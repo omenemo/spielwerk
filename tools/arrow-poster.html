@@ -63,6 +63,7 @@ const DEFS = [
 ];
 const p = {};
 const saved = JSON.parse(localStorage.getItem("arrow-poster") || "{}");
+p.zorder = saved.zorder || [];
 const controls = document.getElementById("controls");
 
 // ---------- artboard size (exact pixels) ----------
@@ -282,7 +283,7 @@ function makeSVG() {
       const shaft = `M${f(Math.max(0.2, 0.95 * sl))} 0.6 L0 0.6 A0.6 0.6 0 0 1 -0.6 0`;
       const swv = f(1.3 * sw);
       const head = `M${f(-0.6 - 0.55 * hw)} 0 L${f(-0.6 + 0.55 * hw)} 0 L-0.6 ${f(-0.7 * hw)} Z`;
-      inner.push(`<g transform="${tf}">`
+      inner.push(`<g data-i="${i}" transform="${tf}">`
         + rings.map(r =>
             `<path d="${shaft}" fill="none" stroke="${r.c}" stroke-width="${f3(swv + 2 * r.w)}"/>`
           + `<path d="${head}" fill="none" stroke="${r.c}" stroke-width="${f3(2 * r.w)}" stroke-linejoin="round"/>`).join("")
@@ -290,12 +291,16 @@ function makeSVG() {
         + `<path d="${head}" fill="${p.color}"/></g>`);
     } else {
       const d = GEN[kind](hl, hw, sw, sl);
-      inner.push(rings.map(r =>
+      inner.push(`<g data-i="${i}">`
+        + rings.map(r =>
           `<path d="${d}" fill="none" stroke="${r.c}" stroke-width="${f3(2 * r.w)}" stroke-linejoin="round" transform="${tf}"/>`).join("")
-        + `<path d="${d}" fill="${p.color}" transform="${tf}"/>`);
+        + `<path d="${d}" fill="${p.color}" transform="${tf}"/></g>`);
     }
   }
-  parts.push(...inner);
+  // z-order: persisted permutation, last = topmost; sanitize against count
+  p.zorder = (p.zorder || []).filter(i => i < p.count);
+  for (let i = 0; i < p.count; i++) if (!p.zorder.includes(i)) p.zorder.push(i);
+  parts.push(...p.zorder.map(i => inner[i]));
   return {w: W, h: H, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`};
 }
 
@@ -372,6 +377,7 @@ function render() {
   localStorage.setItem("arrow-poster", JSON.stringify(p));
   art = makeSVG();
   stage.innerHTML = art.svg;
+  for (const g of stage.querySelectorAll("g[data-i]")) g.style.cursor = "pointer";
   applyZoom();
   document.getElementById("dlsvg").href =
     URL.createObjectURL(new Blob([art.svg], {type: "image/svg+xml"}));
@@ -393,6 +399,15 @@ document.getElementById("dlpng").addEventListener("click", async e => {
   a.click();
 });
 render();
+
+// magic stick — click an arrow, it goes topmost
+stage.addEventListener("click", e => {
+  const g = e.target.closest("g[data-i]");
+  if (!g || space) return;
+  const i = +g.dataset.i;
+  p.zorder = p.zorder.filter(x => x !== i).concat(i);
+  render();
+});
 
 // self-check: deterministic output for fixed params
 console.assert(makeSVG().svg === makeSVG().svg, "generator must be deterministic");
