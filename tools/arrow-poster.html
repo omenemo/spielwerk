@@ -10,8 +10,14 @@
   #panel input[type=range] { width: 100%; min-width: 0; margin: 0; }
   #panel input[type=color], #panel select, #panel input[type=checkbox] { justify-self: end; grid-column: 2 / 4; }
   #panel output { text-align: right; font-variant-numeric: tabular-nums; }
-  #stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; }
-  #stage svg { max-height: 92vh; max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,.18); }
+  #stage { flex: 1; display: flex; overflow: auto; position: relative; }
+  #stage svg { display: block; margin: auto; box-shadow: 0 4px 24px rgba(0,0,0,.18); }
+  #viewbox { position: fixed; right: 16px; top: 16px; display: flex; align-items: center; gap: 8px;
+             background: #fff; border-radius: 8px; padding: 8px 12px; box-shadow: 0 2px 12px rgba(0,0,0,.15); }
+  #viewbox span { color: #444; }
+  #viewbox output { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+  #viewbox button { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 3px 10px;
+                    font: inherit; cursor: pointer; }
   .btns { display: flex; gap: 8px; margin-top: 16px; }
   .btns a { flex: 1; text-align: center; padding: 7px 0; border-radius: 8px; background: #3b82f6; color: #fff; text-decoration: none; }
   h1 { font-size: 14px; margin: 0 0 6px; }
@@ -23,6 +29,12 @@
   <div class="btns"><a id="dlsvg">⬇ SVG</a><a id="dlpng">⬇ PNG</a></div>
 </div>
 <div id="stage"></div>
+<div id="viewbox">
+  <span>view</span>
+  <input id="zoom" type="range" min="5" max="100" step="5">
+  <output id="zoomout"></output>
+  <button id="fit">fit</button>
+</div>
 <script>
 // ---------- parameters ----------
 const DEFS = [
@@ -224,11 +236,33 @@ function makeSVG() {
 
 // ---------- render + export ----------
 const stage = document.getElementById("stage");
+const zoomEl = document.getElementById("zoom"), zoomOut = document.getElementById("zoomout");
+p.zoom = saved.zoom ?? 50;
+zoomEl.value = p.zoom;
 let art;
+function applyZoom() {
+  zoomOut.value = p.zoom + " %";
+  const svg = stage.querySelector("svg");
+  if (svg) svg.style.width = (art.w * (+p.res / 1000) * p.zoom / 100) + "px";
+}
+zoomEl.addEventListener("input", () => {
+  p.zoom = +zoomEl.value;
+  localStorage.setItem("arrow-poster", JSON.stringify(p));
+  applyZoom();
+});
+document.getElementById("fit").addEventListener("click", () => {
+  const px = +p.res / 1000;
+  const fit = Math.min((stage.clientWidth - 48) / (art.w * px), (stage.clientHeight - 48) / (art.h * px));
+  p.zoom = Math.max(5, Math.min(100, Math.floor(fit * 20) * 5));
+  zoomEl.value = p.zoom;
+  localStorage.setItem("arrow-poster", JSON.stringify(p));
+  applyZoom();
+});
 function render() {
   localStorage.setItem("arrow-poster", JSON.stringify(p));
   art = makeSVG();
   stage.innerHTML = art.svg;
+  applyZoom();
   document.getElementById("dlsvg").href =
     URL.createObjectURL(new Blob([art.svg], {type: "image/svg+xml"}));
   document.getElementById("dlsvg").download = `arrows-${p.seed}.svg`;
