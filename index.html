@@ -35,7 +35,7 @@
 <div id="stage">
   <iframe id="frame" title="tool"></iframe>
   <div id="about">
-    <header id="grab"><span id="aname"></span><button id="close" aria-label="close">✕</button></header>
+    <header id="grab"><span>spielwerk</span><button id="close" aria-label="close">✕</button></header>
     <div class="body">
       <p>A collection of small parametric design tools. Each tool is a single
          self-contained page: sliders on the left, live vector preview on the
@@ -57,11 +57,9 @@
   const load = () => {
     const t = tools[$("pick").selectedIndex];
     $("frame").src = t.file;
-    $("aname").textContent = t.name;
     $("desc").textContent = t.desc;
-    $("about").style.display = "";        // reopen on tool switch
   };
-  $("pick").addEventListener("input", load);
+  $("pick").addEventListener("input", () => { load(); $("about").style.display = "none"; });
   load();
 
   $("close").addEventListener("click", () => $("about").style.display = "none");
