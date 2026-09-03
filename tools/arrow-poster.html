@@ -73,13 +73,19 @@ p.hpx = +saved.hpx || 2000;
   for (const o of ["custom", "2:3", "3:4", "4:5", "1:1", "9:16"]) preset.append(new Option(o, o));
   const swap = Object.assign(document.createElement("button"), {textContent: "⇄", title: "swap width/height"});
   swap.style.cssText = "font:inherit;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer";
+  p.lock = saved.lock ?? false;
+  const lock = Object.assign(document.createElement("button"), {title: "lock aspect ratio"});
+  lock.style.cssText = "font:inherit;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer";
+  const drawLock = () => { lock.textContent = p.lock ? "🔒" : "🔓"; lock.style.background = p.lock ? "#eef" : "#fff"; };
+  drawLock();
+  lock.addEventListener("click", () => { p.lock = !p.lock; drawLock(); localStorage.setItem("arrow-poster", JSON.stringify(p)); });
 
   const sizeRow = document.createElement("label");
   sizeRow.style.cssText = "display:flex;justify-content:space-between;align-items:center";
   sizeRow.innerHTML = "<span>artboard px</span>";
   const sizeBox = document.createElement("span");
   sizeBox.style.cssText = "display:flex;align-items:center;gap:4px";
-  sizeBox.append(wIn, "×", hIn);
+  sizeBox.append(wIn, "×", hIn, lock);
   sizeRow.append(sizeBox);
 
   const presetRow = document.createElement("label");
@@ -95,8 +101,16 @@ p.hpx = +saved.hpx || 2000;
     wIn.value = p.wpx; hIn.value = p.hpx;
     render();
   };
-  wIn.addEventListener("change", () => { preset.value = "custom"; apply(); });
-  hIn.addEventListener("change", () => { preset.value = "custom"; apply(); });
+  wIn.addEventListener("change", () => {
+    if (p.lock) hIn.value = Math.round((+wIn.value || p.wpx) * p.hpx / p.wpx);
+    else preset.value = "custom";
+    apply();
+  });
+  hIn.addEventListener("change", () => {
+    if (p.lock) wIn.value = Math.round((+hIn.value || p.hpx) * p.wpx / p.hpx);
+    else preset.value = "custom";
+    apply();
+  });
   preset.addEventListener("input", () => {
     if (preset.value === "custom") return;
     const [a, b] = preset.value.split(":").map(Number);
