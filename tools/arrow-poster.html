@@ -3,7 +3,8 @@
 <meta charset="utf-8">
 <title>Arrow Poster — parametric generator</title>
 <style>
-  body { font: 13px/1.4 system-ui, sans-serif; margin: 0; display: flex; min-height: 100vh; background: #e9e7e2; }
+  html, body { height: 100%; overflow: hidden; }
+  body { font: 13px/1.4 system-ui, sans-serif; margin: 0; display: flex; background: #e9e7e2; }
   #panel { width: 264px; margin: 16px; padding: 14px 18px; background: #fff; border-radius: 8px;
            box-shadow: 0 2px 12px rgba(0,0,0,.15); box-sizing: border-box; flex-shrink: 0;
            align-self: flex-start; max-height: calc(100vh - 32px); overflow-y: auto; }
@@ -297,24 +298,72 @@ function makeSVG() {
 // ---------- render + export ----------
 const stage = document.getElementById("stage");
 const zoomEl = document.getElementById("zoom");
-p.zoom = typeof saved.zoom === "string" ? saved.zoom : "fit";
-zoomEl.value = p.zoom;
+p.zoom = saved.zoom === "fit" || typeof saved.zoom === "number" ? saved.zoom : "fit";  // "fit" | percent
 let art;
+const zPct = () => p.zoom === "fit"
+  ? Math.min((stage.clientWidth - 64) / art.w, (stage.clientHeight - 64) / art.h, 1) * 100
+  : p.zoom;
+function syncSelect() {
+  if (p.zoom === "fit") { zoomEl.value = "fit"; return; }
+  const label = Math.round(p.zoom) + "%";
+  let opt = [...zoomEl.options].find(o => o.value === label);
+  if (!opt) {
+    opt = zoomEl.querySelector(".custom") || zoomEl.appendChild(Object.assign(new Option(), {className: "custom"}));
+    opt.textContent = opt.value = label;
+  }
+  zoomEl.value = label;
+}
 function applyZoom() {
   const svg = stage.querySelector("svg");
   if (!svg) return;
-  const z = p.zoom === "fit"
-    ? Math.min((stage.clientWidth - 64) / art.w, (stage.clientHeight - 64) / art.h, 1)
-    : parseFloat(p.zoom) / 100;
+  const z = zPct() / 100;
   svg.style.width = art.w * z + "px";
   svg.style.height = art.h * z + "px";   // both set — box always matches viewBox, no letterbox
+  syncSelect();
 }
-zoomEl.addEventListener("input", () => {
-  p.zoom = zoomEl.value;
+function setZoom(v, ax, ay) {            // v: "fit" | percent; ax/ay: stage-relative anchor
+  const oldZ = zPct() / 100;
+  p.zoom = v === "fit" ? "fit" : Math.max(2, Math.min(800, v));
   localStorage.setItem("arrow-poster", JSON.stringify(p));
+  const r = stage.getBoundingClientRect();
+  ax ??= r.width / 2; ay ??= r.height / 2;
+  const cx = stage.scrollLeft + ax, cy = stage.scrollTop + ay;
   applyZoom();
-});
+  const k = (zPct() / 100) / oldZ;       // keep the anchor point stationary
+  stage.scrollLeft = cx * k - ax;
+  stage.scrollTop = cy * k - ay;
+}
+zoomEl.addEventListener("input", () => setZoom(zoomEl.value === "fit" ? "fit" : parseFloat(zoomEl.value)));
 addEventListener("resize", () => { if (p.zoom === "fit") applyZoom(); });
+
+// ---------- adobe-style navigation ----------
+let space = false;
+const typing = e => /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
+addEventListener("keydown", e => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (e.code === "Space" && !typing(e)) { space = true; stage.style.cursor = "grab"; e.preventDefault(); }
+  else if (mod && (e.key === "+" || e.key === "=")) { e.preventDefault(); setZoom(zPct() * 1.25); }
+  else if (mod && e.key === "-") { e.preventDefault(); setZoom(zPct() / 1.25); }
+  else if (mod && e.key === "0") { e.preventDefault(); setZoom("fit"); }
+  else if (mod && e.key === "1") { e.preventDefault(); setZoom(100); }
+});
+addEventListener("keyup", e => { if (e.code === "Space") { space = false; stage.style.cursor = ""; } });
+stage.addEventListener("pointerdown", e => {          // space + drag = pan
+  if (!space) return;
+  e.preventDefault();
+  const sx = e.clientX, sy = e.clientY, sl = stage.scrollLeft, st = stage.scrollTop;
+  stage.style.cursor = "grabbing";
+  const move = ev => { stage.scrollLeft = sl - (ev.clientX - sx); stage.scrollTop = st - (ev.clientY - sy); };
+  stage.setPointerCapture(e.pointerId);
+  stage.addEventListener("pointermove", move);
+  stage.addEventListener("pointerup", () => { stage.removeEventListener("pointermove", move); stage.style.cursor = "grab"; }, {once: true});
+});
+stage.addEventListener("wheel", e => {                // ⌘/ctrl/alt + wheel (or pinch) = zoom to cursor
+  if (!(e.ctrlKey || e.metaKey || e.altKey)) return;  // plain wheel/trackpad = scroll
+  e.preventDefault();
+  const r = stage.getBoundingClientRect();
+  setZoom(zPct() * Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top);
+}, {passive: false});
 function render() {
   localStorage.setItem("arrow-poster", JSON.stringify(p));
   art = makeSVG();
