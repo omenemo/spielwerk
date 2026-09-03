@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Arrow Poster — parametric generator</title>
+<style>
+  body { font: 13px/1.4 system-ui, sans-serif; margin: 0; display: flex; min-height: 100vh; background: #e9e7e2; }
+  #panel { width: 260px; padding: 18px; background: #fff; border-right: 1px solid #ddd; box-sizing: border-box; }
+  #panel label { display: grid; grid-template-columns: 90px 1fr 38px; align-items: center; margin: 10px 0; gap: 6px; }
+  #panel label span:first-child { color: #444; }
+  #panel input[type=range] { width: 100%; min-width: 0; margin: 0; }
+  #panel input[type=color], #panel select, #panel input[type=checkbox] { justify-self: end; grid-column: 2 / 4; }
+  #panel output { text-align: right; font-variant-numeric: tabular-nums; }
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  #stage svg { max-height: 92vh; max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,.18); }
+  .btns { display: flex; gap: 8px; margin-top: 16px; }
+  .btns a { flex: 1; text-align: center; padding: 7px 0; border-radius: 8px; background: #3b82f6; color: #fff; text-decoration: none; }
+  h1 { font-size: 14px; margin: 0 0 6px; }
+</style>
+<body>
+<div id="panel">
+  <h1>Arrow Poster</h1>
+  <div id="controls"></div>
+  <div class="btns"><a id="dlsvg">⬇ SVG</a><a id="dlpng">⬇ PNG</a></div>
+</div>
+<div id="stage"></div>
+<script>
+// ---------- parameters ----------
+const DEFS = [
+  ["seed",   "range", {min: 1, max: 9999, step: 1, value: 42}],
+  ["count",  "range", {min: 1, max: 15, step: 1, value: 6, label: "arrows"}],
+  ["size",   "range", {min: 40, max: 200, step: 5, value: 100, label: "scale %"}],
+  ["cols",   "range", {min: 1, max: 5, step: 1, value: 2, label: "grid cols"}],
+  ["rows",   "range", {min: 1, max: 6, step: 1, value: 3, label: "grid rows"}],
+  ["jitter", "range", {min: 0, max: 100, step: 5, value: 20, label: "jitter %"}],
+  ["headL",  "range", {min: 15, max: 85, step: 1, value: 40, label: "head length %"}],
+  ["headW",  "range", {min: 20, max: 130, step: 1, value: 95, label: "head width %"}],
+  ["shaftW", "range", {min: 8, max: 90, step: 1, value: 42, label: "shaft width %"}],
+  ["variety", "range", {min: 0, max: 100, step: 5, value: 25, label: "variety %"}],
+  ["snap",   "select", {options: ["free", "45°", "90°"], value: "45°", label: "rotation"}],
+  ["color",  "color", {value: "#e84f5e", label: "arrow color"}],
+  ["paper",  "color", {value: "#f4f1ea", label: "paper"}],
+  ["frame",  "checkbox", {value: true, label: "black frame"}],
+  ["cwidth", "range", {min: 0, max: 16, step: 0.5, value: 4, label: "contour px"}],
+  ["gradA",  "color", {value: "#1c1c1c", label: "gradient start"}],
+  ["gradB",  "color", {value: "#f5c518", label: "gradient end"}],
+  ["steps",  "range", {min: 1, max: 8, step: 1, value: 4, label: "contour colors"}]
+];
+const p = {};
+const controls = document.getElementById("controls");
+for (const [key, type, opt] of DEFS) {
+  p[key] = opt.value;
+  const label = document.createElement("label");
+  const name = document.createElement("span");
+  name.textContent = opt.label || key;
+  label.append(name);
+  let input;
+  if (type === "select") {
+    input = document.createElement("select");
+    for (const o of opt.options) input.append(new Option(o, o, o === opt.value, o === opt.value));
+  } else {
+    input = document.createElement("input");
+    input.type = type;
+    if (type === "range") Object.assign(input, {min: opt.min, max: opt.max, step: opt.step});
+    if (type === "checkbox") input.checked = opt.value; else input.value = opt.value;
+  }
+  label.append(input);
+  let out;
+  if (type === "range") { out = document.createElement("output"); out.value = opt.value; label.append(out); }
+  input.addEventListener("input", () => {
+    p[key] = type === "checkbox" ? input.checked : type === "range" ? +input.value : input.value;
+    if (out) out.value = input.value;
+    render();
+  });
+  controls.append(label);
+}
+
+// shape mix checkboxes
+const KINDS = ["block", "round", "roof", "tri", "hook"];
+p.kinds = [...KINDS];
+{
+  const row = document.createElement("label");
+  row.innerHTML = "<span>shapes</span>";
+  const box = document.createElement("span");
+  box.style.cssText = "display:flex;flex-wrap:wrap;gap:4px 8px;flex:1";
+  for (const k of KINDS) {
+    const l = document.createElement("label");
+    l.style.cssText = "display:inline-flex;gap:3px;margin:0";
+    const cb = Object.assign(document.createElement("input"), {type: "checkbox", checked: true});
+    cb.addEventListener("input", () => {
+      p.kinds = KINDS.filter((_, i) => box.querySelectorAll("input")[i].checked);
+      render();
+    });
+    l.append(cb, k);
+    box.append(l);
+  }
+  row.append(box);
+  controls.append(row);
+}
+
+// ---------- Lab gradient (matches d3.interpolateLab) ----------
+const hex2lab = h => {
+  const [r, g, b] = [1, 3, 5].map(i => {
+    const c = parseInt(h.slice(i, i + 2), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  const xyz = [
+    (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047,
+    0.2126 * r + 0.7152 * g + 0.0722 * b,
+    (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+  ].map(v => v > 0.008856 ? Math.cbrt(v) : 7.787 * v + 16 / 116);
+  return [116 * xyz[1] - 16, 500 * (xyz[0] - xyz[1]), 200 * (xyz[1] - xyz[2])];
+};
+const lab2rgb = ([L, A, B]) => {
+  const y = (L + 16) / 116, x = y + A / 500, z = y - B / 200;
+  const [X, Y, Z] = [x, y, z].map(v => v ** 3 > 0.008856 ? v ** 3 : (v - 16 / 116) / 7.787);
+  const lin = [
+    3.2406 * X * 0.95047 - 1.5372 * Y - 0.4986 * Z * 1.08883,
+    -0.9689 * X * 0.95047 + 1.8758 * Y + 0.0415 * Z * 1.08883,
+    0.0557 * X * 0.95047 - 0.204 * Y + 1.057 * Z * 1.08883
+  ];
+  return "rgb(" + lin.map(c => {
+    const s = c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055;
+    return Math.max(0, Math.min(255, Math.round(255 * s)));
+  }).join(",") + ")";
+};
+const gradient = (a, b) => {
+  const la = hex2lab(a), lb = hex2lab(b);
+  return t => lab2rgb(la.map((v, i) => v + t * (lb[i] - v)));
+};
+
+// ---------- generator (same as the pi-ui widget) ----------
+function makeSVG() {
+  const W = 720, H = 1000, M = 28;
+  const mulberry = s => () => {
+    s |= 0; s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const rnd = mulberry(p.seed), rnd2 = mulberry(p.seed * 31 + 7), rnd3 = mulberry(p.seed * 97 + 13);
+  const f = n => +n.toFixed(2), f3 = n => +n.toFixed(3);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const g = gradient(p.gradA, p.gradB);
+  const pal = Array.from({length: p.steps}, (_, i) => g(p.steps === 1 ? 0.5 : i / (p.steps - 1)));
+  // parametric arrow geometry — local coords, tip up, ~unit box
+  const GEN = {
+    block: (hl, hw, sw) => {
+      const b = f(-1 + 2 * hl);
+      return `M0 -1 L${f(hw)} ${b} L${f(sw)} ${b} L${f(sw)} 1 L${f(-sw)} 1 L${f(-sw)} ${b} L${f(-hw)} ${b} Z`;
+    },
+    round: (hl, hw, sw) => {
+      const b = f(-1 + 2 * hl), t = f(1 - sw);
+      return `M0 -1 L${f(hw)} ${b} L${f(sw)} ${b} L${f(sw)} ${t} A${f(sw)} ${f(sw)} 0 0 1 ${f(-sw)} ${t} L${f(-sw)} ${b} L${f(-hw)} ${b} Z`;
+    },
+    roof: (hl, hw, sw) => {
+      const b = f(-1 + 2 * hl), t = f(-1 + 2 * hl + 0.4);
+      return `M0 -1 L${f(hw * 2)} ${b} L${f(-hw * 2)} ${b} Z M${f(-sw)} ${b} L${f(sw)} ${b} L${f(sw)} ${t} L${f(-sw)} ${t} Z`;
+    },
+    tri: (hl, hw, sw) => `M0 -1.1 L${f(hw)} 0.8 L${f(-hw)} 0.8 Z`
+  };
+  const kinds = p.kinds.length ? p.kinds : KINDS;
+  const pw = W - 2 * M, ph = H - 2 * M;
+  const parts = [`<rect width="${W}" height="${H}" fill="${p.frame ? "#1c1c1c" : p.paper}"/>`];
+  const inner = [`<rect width="${pw}" height="${ph}" fill="${p.paper}"/>`];
+
+  const cw = pw / p.cols, ch = ph / p.rows, ncells = p.cols * p.rows;
+  const order = Array.from({length: ncells}, (_, i) => i);
+  for (let i = ncells - 1; i > 0; i--) {
+    const j = (rnd() * (i + 1)) | 0;
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+
+  for (let i = 0; i < p.count; i++) {
+    const cell = order[i % ncells];
+    const x = (cell % p.cols + 0.5) * cw + (rnd() - 0.5) * cw * (p.jitter / 100);
+    const y = ((cell / p.cols | 0) + 0.5) * ch + (rnd() - 0.5) * ch * (p.jitter / 100);
+    const sc = f(Math.min(cw, ch) * (0.4 + rnd() * 0.25) * (p.size / 100));
+    let a = rnd() * 360;
+    if (p.snap !== "free") {
+      const st = p.snap === "45°" ? 45 : 90;
+      a = Math.round(a / st) * st;
+    }
+    const tf = `translate(${f(x)} ${f(y)}) rotate(${f(a)}) scale(${sc})`;
+    const kind = kinds[(rnd() * kinds.length) | 0];
+
+    // per-arrow geometry: sliders ± variety, drawn unconditionally so the
+    // stream stays aligned whatever kinds are selected
+    const v = p.variety / 100;
+    const vr = () => 1 + (rnd3() * 2 - 1) * v;
+    const hw = clamp(p.headW / 100 * vr(), 0.2, 1.4);
+    const hl = clamp(p.headL / 100 * vr(), 0.15, 0.85);
+    const sw = clamp(p.shaftW / 100 * vr(), 0.08, hw * 0.92);
+
+    let acc = 0;
+    const rings = p.cwidth
+      ? pal.map(c => { acc += (p.cwidth / sc) * (0.4 + rnd2() * 1.2); return {c, w: acc}; }).reverse()
+      : [];
+    if (kind === "hook") {
+      const shaft = "M0.95 0.6 L0 0.6 A0.6 0.6 0 0 1 -0.6 0";
+      const swv = f(1.3 * sw);
+      const head = `M${f(-0.6 - 0.55 * hw)} 0 L${f(-0.6 + 0.55 * hw)} 0 L-0.6 ${f(-0.7 * hw)} Z`;
+      inner.push(`<g transform="${tf}">`
+        + rings.map(r =>
+            `<path d="${shaft}" fill="none" stroke="${r.c}" stroke-width="${f3(swv + 2 * r.w)}"/>`
+          + `<path d="${head}" fill="none" stroke="${r.c}" stroke-width="${f3(2 * r.w)}" stroke-linejoin="round"/>`).join("")
+        + `<path d="${shaft}" fill="none" stroke="${p.color}" stroke-width="${swv}"/>`
+        + `<path d="${head}" fill="${p.color}"/></g>`);
+    } else {
+      const d = GEN[kind](hl, hw, sw);
+      inner.push(rings.map(r =>
+          `<path d="${d}" fill="none" stroke="${r.c}" stroke-width="${f3(2 * r.w)}" stroke-linejoin="round" transform="${tf}"/>`).join("")
+        + `<path d="${d}" fill="${p.color}" transform="${tf}"/>`);
+    }
+  }
+  parts.push(`<svg x="${M}" y="${M}" width="${pw}" height="${ph}">${inner.join("")}</svg>`);
+  return {w: W, h: H, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`};
+}
+
+// ---------- render + export ----------
+const stage = document.getElementById("stage");
+let art;
+function render() {
+  art = makeSVG();
+  stage.innerHTML = art.svg;
+  document.getElementById("dlsvg").href =
+    URL.createObjectURL(new Blob([art.svg], {type: "image/svg+xml"}));
+  document.getElementById("dlsvg").download = `arrows-${p.seed}.svg`;
+}
+document.getElementById("dlpng").addEventListener("click", async e => {
+  const a = e.currentTarget;
+  if (a.dataset.ready) { delete a.dataset.ready; return; }   // second pass = real download
+  e.preventDefault();
+  const img = new Image();
+  img.src = URL.createObjectURL(new Blob([art.svg], {type: "image/svg+xml"}));
+  await img.decode();
+  const c = document.createElement("canvas");
+  c.width = 2 * art.w; c.height = 2 * art.h;
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  a.href = c.toDataURL("image/png");
+  a.download = `arrows-${p.seed}.png`;
+  a.dataset.ready = 1;
+  a.click();
+});
+render();
+
+// self-check: deterministic output for fixed params
+console.assert(makeSVG().svg === makeSVG().svg, "generator must be deterministic");
+</script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>spielwerk — small design tools</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; background: #1c1c1c; color: #f4f1ea; min-height: 100vh; }
+  main { max-width: 860px; margin: 0 auto; padding: 48px 24px; }
+  h1 { font-size: 28px; margin: 0; letter-spacing: -0.5px; }
+  h1 + p { color: #999; margin-top: 4px; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; margin-top: 32px; }
+  a.tool { display: block; padding: 20px; border-radius: 12px; background: #2a2a2a; color: inherit;
+           text-decoration: none; border: 1px solid #333; transition: border-color .15s; }
+  a.tool:hover { border-color: #e84f5e; }
+  a.tool h2 { font-size: 17px; margin: 0 0 6px; }
+  a.tool p { font-size: 13px; color: #aaa; margin: 0; }
+</style>
+<body>
+<main>
+  <h1>spielwerk</h1>
+  <p>small parametric design tools</p>
+  <div id="grid"></div>
+</main>
+<script>
+  fetch("tools.json").then(r => r.json()).then(tools => {
+    document.getElementById("grid").innerHTML = tools.map(t =>
+      `<a class="tool" href="${t.file}"><h2>${t.name}</h2><p>${t.desc}</p></a>`).join("");
+  });
+</script>
+</body>
+</html>
