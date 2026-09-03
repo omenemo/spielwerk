@@ -46,9 +46,10 @@ const DEFS = [
   ["steps",  "range", {min: 1, max: 8, step: 1, value: 4, label: "contour colors"}]
 ];
 const p = {};
+const saved = JSON.parse(localStorage.getItem("arrow-poster") || "{}");
 const controls = document.getElementById("controls");
 for (const [key, type, opt] of DEFS) {
-  p[key] = opt.value;
+  p[key] = key in saved ? saved[key] : opt.value;
   const label = document.createElement("label");
   const name = document.createElement("span");
   name.textContent = opt.label || key;
@@ -56,16 +57,16 @@ for (const [key, type, opt] of DEFS) {
   let input;
   if (type === "select") {
     input = document.createElement("select");
-    for (const o of opt.options) input.append(new Option(o, o, o === opt.value, o === opt.value));
+    for (const o of opt.options) input.append(new Option(o, o, o === p[key], o === p[key]));
   } else {
     input = document.createElement("input");
     input.type = type;
     if (type === "range") Object.assign(input, {min: opt.min, max: opt.max, step: opt.step});
-    if (type === "checkbox") input.checked = opt.value; else input.value = opt.value;
+    if (type === "checkbox") input.checked = p[key]; else input.value = p[key];
   }
   label.append(input);
   let out;
-  if (type === "range") { out = document.createElement("output"); out.value = opt.value; label.append(out); }
+  if (type === "range") { out = document.createElement("output"); out.value = p[key]; label.append(out); }
   input.addEventListener("input", () => {
     p[key] = type === "checkbox" ? input.checked : type === "range" ? +input.value : input.value;
     if (out) out.value = input.value;
@@ -76,7 +77,7 @@ for (const [key, type, opt] of DEFS) {
 
 // shape mix checkboxes
 const KINDS = ["block", "round", "roof", "tri", "hook"];
-p.kinds = [...KINDS];
+p.kinds = saved.kinds ?? [...KINDS];
 {
   const row = document.createElement("label");
   row.innerHTML = "<span>shapes</span>";
@@ -85,7 +86,7 @@ p.kinds = [...KINDS];
   for (const k of KINDS) {
     const l = document.createElement("label");
     l.style.cssText = "display:inline-flex;gap:3px;margin:0";
-    const cb = Object.assign(document.createElement("input"), {type: "checkbox", checked: true});
+    const cb = Object.assign(document.createElement("input"), {type: "checkbox", checked: p.kinds.includes(k)});
     cb.addEventListener("input", () => {
       p.kinds = KINDS.filter((_, i) => box.querySelectorAll("input")[i].checked);
       render();
@@ -220,6 +221,7 @@ function makeSVG() {
 const stage = document.getElementById("stage");
 let art;
 function render() {
+  localStorage.setItem("arrow-poster", JSON.stringify(p));
   art = makeSVG();
   stage.innerHTML = art.svg;
   document.getElementById("dlsvg").href =
