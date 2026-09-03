@@ -46,18 +46,22 @@
 <script>
   const $ = id => document.getElementById(id);
 
-  fetch("tools.json").then(r => r.json()).then(tools => {
-    for (const t of tools) $("pick").append(new Option(t.name, t.file));
-    const load = () => {
-      const t = tools[$("pick").selectedIndex];
-      $("frame").src = t.file;
-      $("aname").textContent = t.name;
-      $("desc").textContent = t.desc;
-      $("about").style.display = "";        // reopen on tool switch
-    };
-    $("pick").addEventListener("input", load);
-    load();
-  });
+  // tool manifest — add a line per tool
+  const tools = [
+    { file: "tools/arrow-poster.html", name: "Arrow Poster",
+      desc: "Parametric arrow compositions on a portrait artboard. Grid placement, stacked contours, SVG/PNG export." }
+  ];
+
+  for (const t of tools) $("pick").append(new Option(t.name, t.file));
+  const load = () => {
+    const t = tools[$("pick").selectedIndex];
+    $("frame").src = t.file;
+    $("aname").textContent = t.name;
+    $("desc").textContent = t.desc;
+    $("about").style.display = "";        // reopen on tool switch
+  };
+  $("pick").addEventListener("input", load);
+  load();
 
   $("close").addEventListener("click", () => $("about").style.display = "none");
 

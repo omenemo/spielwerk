@@ -6,7 +6,7 @@ no build, no dependencies, works from `file://` or any static host.
 ## Adding a tool
 
 1. Drop `your-tool.html` into `tools/`
-2. Add one entry to `tools.json`
+2. Add one line to the `tools` array in `index.html`
 
 ## Hosting
 
