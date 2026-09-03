@@ -96,22 +96,24 @@ p.hpx = +saved.hpx || 2000;
   presetBox.append(preset, swap);
   presetRow.append(presetBox);
 
-  const apply = () => {
+  let ratio = p.hpx / p.wpx;                     // locked aspect, frozen at lock time
+  lock.addEventListener("click", () => { if (p.lock) ratio = p.hpx / p.wpx; });
+  const apply = soft => {
     p.wpx = Math.max(100, Math.min(8000, +wIn.value || p.wpx));
     p.hpx = Math.max(100, Math.min(8000, +hIn.value || p.hpx));
-    wIn.value = p.wpx; hIn.value = p.hpx;
-    render();
+    if (!soft) { wIn.value = p.wpx; hIn.value = p.hpx; ratio = p.hpx / p.wpx; }
+    render();                                    // render() persists — saves on every keystroke
   };
-  wIn.addEventListener("change", () => {
-    if (p.lock) hIn.value = Math.round((+wIn.value || p.wpx) * p.hpx / p.wpx);
+  const onEdit = (src, other, factor) => soft => {
+    if (p.lock) other.value = Math.round((+src.value || 100) * factor());
     else preset.value = "custom";
-    apply();
-  });
-  hIn.addEventListener("change", () => {
-    if (p.lock) wIn.value = Math.round((+hIn.value || p.hpx) * p.wpx / p.hpx);
-    else preset.value = "custom";
-    apply();
-  });
+    apply(soft);
+  };
+  const wEdit = onEdit(wIn, hIn, () => ratio), hEdit = onEdit(hIn, wIn, () => 1 / ratio);
+  wIn.addEventListener("input", () => wEdit(true));    // live: saves while typing, no clamp-fight
+  wIn.addEventListener("change", () => wEdit(false));  // commit: normalize the field
+  hIn.addEventListener("input", () => hEdit(true));
+  hIn.addEventListener("change", () => hEdit(false));
   preset.addEventListener("input", () => {
     if (preset.value === "custom") return;
     const [a, b] = preset.value.split(":").map(Number);
