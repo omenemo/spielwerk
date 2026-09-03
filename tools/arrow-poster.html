@@ -4,16 +4,18 @@
 <title>Arrow Poster — parametric generator</title>
 <style>
   body { font: 13px/1.4 system-ui, sans-serif; margin: 0; display: flex; min-height: 100vh; background: #e9e7e2; }
-  #panel { width: 260px; padding: 18px; background: #fff; border-right: 1px solid #ddd; box-sizing: border-box; }
+  #panel { width: 264px; margin: 16px; padding: 14px 18px; background: #fff; border-radius: 8px;
+           box-shadow: 0 2px 12px rgba(0,0,0,.15); box-sizing: border-box; flex-shrink: 0;
+           align-self: flex-start; max-height: calc(100vh - 32px); overflow-y: auto; }
   #panel label { display: grid; grid-template-columns: 90px 1fr 38px; align-items: center; margin: 10px 0; gap: 6px; }
   #panel label span:first-child { color: #444; }
   #panel input[type=range] { width: 100%; min-width: 0; margin: 0; }
   #panel input[type=color], #panel select, #panel input[type=checkbox] { justify-self: end; grid-column: 2 / 4; }
   #panel output { text-align: right; font-variant-numeric: tabular-nums; }
   #stage { flex: 1; display: flex; overflow: auto; padding: 32px; }
-  #stage svg { display: block; margin: auto; flex-shrink: 0; }
-  #panel input[type=number] { width: 62px; font: inherit; }
-  #viewbox { position: fixed; right: 16px; top: 16px; display: flex; align-items: center; gap: 8px;
+  #stage svg { display: block; margin: auto; flex-shrink: 0; box-shadow: 0 4px 24px rgba(0,0,0,.18); }
+  #panel input[type=number] { width: 58px; box-sizing: border-box; font: inherit; }
+  #viewbox { position: fixed; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px;
              background: #fff; border-radius: 8px; padding: 8px 12px; box-shadow: 0 2px 12px rgba(0,0,0,.15); }
   #viewbox span { color: #444; }
   #viewbox select { font: inherit; padding: 3px 6px; }
@@ -73,9 +75,10 @@ p.hpx = +saved.hpx || 2000;
   swap.style.cssText = "font:inherit;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer";
 
   const sizeRow = document.createElement("label");
+  sizeRow.style.cssText = "display:flex;justify-content:space-between;align-items:center";
   sizeRow.innerHTML = "<span>artboard px</span>";
   const sizeBox = document.createElement("span");
-  sizeBox.style.cssText = "display:flex;align-items:center;gap:4px;grid-column:2/4;justify-self:end";
+  sizeBox.style.cssText = "display:flex;align-items:center;gap:4px";
   sizeBox.append(wIn, "×", hIn);
   sizeRow.append(sizeBox);
 
