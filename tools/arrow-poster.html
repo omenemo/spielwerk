@@ -21,14 +21,14 @@
   #viewbox span { color: #444; }
   #viewbox select { font: inherit; padding: 3px 6px; }
   .btns { display: flex; gap: 8px; margin-top: 16px; }
-  .btns a { flex: 1; text-align: center; padding: 7px 0; border-radius: 8px; background: #3b82f6; color: #fff; text-decoration: none; }
+  .btns a { flex: 1; text-align: center; padding: 7px 0; border-radius: 8px; background: #3b82f6; color: #fff; text-decoration: none; cursor: pointer; }
   h1 { font-size: 14px; margin: 0 0 6px; }
 </style>
 <body>
 <div id="panel">
   <h1>Arrow Poster</h1>
   <div id="controls"></div>
-  <div class="btns"><a id="dlsvg">⬇ SVG</a><a id="dlpng">⬇ PNG</a></div>
+  <div class="btns"><a id="dlsvg">⬇ SVG</a><a id="dlpng">⬇ PNG</a><a id="dldir" title="choose export folder">📁 …</a></div>
 </div>
 <div id="stage"></div>
 <div id="viewbox">
@@ -39,6 +39,7 @@
     <option>100%</option><option>150%</option><option>200%</option>
   </select>
 </div>
+<script src="export.js"></script>
 <script>
 // ---------- parameters ----------
 const DEFS = [
@@ -59,7 +60,13 @@ const DEFS = [
   ["cwidth", "range", {min: 0, max: 16, step: 0.5, value: 4, label: "contour px"}],
   ["gradA",  "color", {value: "#1c1c1c", label: "gradient start"}],
   ["gradB",  "color", {value: "#f5c518", label: "gradient end"}],
-  ["steps",  "range", {min: 1, max: 8, step: 1, value: 4, label: "contour colors"}]
+  ["steps",  "range", {min: 1, max: 8, step: 1, value: 4, label: "contour colors"}],
+  ["motion", "select", {options: ["none", "slide in", "slide loop"], value: "none", label: "motion"}],
+  ["travel", "range", {min: 5, max: 100, step: 5, value: 100, label: "slide in %"}],
+  ["timing", "select", {options: ["ease out", "linear", "snap"], value: "ease out", label: "timing"}],
+  ["hold",   "range", {min: 0, max: 90, step: 5, value: 40, label: "hold %"}],
+  ["speed",  "range", {min: 0.5, max: 20, step: 0.5, value: 2, label: "cycle sec"}],
+  ["stagger","range", {min: 0, max: 100, step: 5, value: 60, label: "stagger %"}]
 ];
 const p = {};
 const saved = JSON.parse(localStorage.getItem("arrow-poster") || "{}");
@@ -220,7 +227,8 @@ function makeSVG() {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-  const rnd = mulberry(p.seed), rnd2 = mulberry(p.seed * 31 + 7), rnd3 = mulberry(p.seed * 97 + 13);
+  const rnd = mulberry(p.seed), rnd2 = mulberry(p.seed * 31 + 7), rnd3 = mulberry(p.seed * 97 + 13),
+        rnd4 = mulberry(p.seed * 131 + 19);
   const f = n => +n.toFixed(2), f3 = n => +n.toFixed(3);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const g = gradient(p.gradA, p.gradB);
@@ -263,7 +271,8 @@ function makeSVG() {
       const st = p.snap === "45°" ? 45 : 90;
       a = Math.round(a / st) * st;
     }
-    const tf = `translate(${f(x)} ${f(y)}) rotate(${f(a)}) scale(${sc})`;
+    const pos = `translate(${f(x)} ${f(y)})`;         // arrow origin, in artboard space
+    const loc = `rotate(${f(a)}) scale(${sc})`;       // orientation + size, about that origin
     const kind = kinds[(rnd() * kinds.length) | 0];
 
     // per-arrow geometry: sliders ± variety, drawn unconditionally so the
@@ -275,26 +284,72 @@ function makeSVG() {
     const sw = clamp(p.shaftW / 100 * vr(), 0.08, hw * 0.92);
     const sl = clamp(p.shaftL / 100 * vr(), 0.1, 5);
 
+    // ---- motion: the head slides in along the shaft axis, tail pinned ----
+    // Two SMIL tracks on one clock: the path `d` morphs from a stub shaft to the
+    // full one (same segment structure, so SVG can interpolate it), and the group
+    // translates by exactly the length the shaft gains — so the rearmost shaft
+    // point never moves and the head travels forward into the designed position.
+    // Every slider therefore describes the final, locked frame.
+    // Ships inside the exported SVG; PNG export rasterizes frame 0.
+    const sl0 = Math.max(0.02, sl * (1 - p.travel / 100));   // shaft length at t=0
+    const b0 = -1 + 2 * hl;                                  // head/shaft junction, local y
+    const TAIL = {                                           // rearmost point per kind
+      block: s => b0 + (1 - b0) * s,
+      round: s => b0 + (1 - b0) * s,
+      roof:  s => b0 + 0.4 * s,
+      tri:   () => 0.8,                                      // no shaft: slides its own length
+      hook:  s => Math.max(0.2, 0.95 * s)                    // hook grows along local +x
+    };
+    const grown = TAIL[kind](sl) - TAIL[kind](sl0);
+    const lead = kind === "tri" ? 2 * (p.travel / 100) : grown;
+    const [lx, ly] = kind === "hook" ? [lead, 0] : [0, lead];   // start offset, local space
+    const rad = a * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+    const off = `${f((lx * cos - ly * sin) * sc)} ${f((lx * sin + ly * cos) * sc)}`;
+    const loop = p.motion === "slide loop";
+    // Timing shape: travel over the first (1 - hold) of the cycle, then sit locked in
+    // the designed position for the rest — the hold is what makes a loop read as
+    // cut-and-hold rather than continuous drift. `snap` = no in-between frames at all.
+    const m = f(1 - p.hold / 100);
+    const CURVE = {
+      "ease out": ` calcMode="spline" keySplines=".16 1 .3 1;0 0 1 1"`,   // fast out, settles
+      "linear":   ` calcMode="linear"`,
+      "snap":     ` calcMode="discrete"`
+    };
+    const beat = Math.round(rnd4() * 8) / 8;                 // phases land on a 1/8 grid
+    const timing = `dur="${f(p.speed)}s"`
+      + ` begin="${f(beat * p.speed * (p.stagger / 100) * (loop ? -1 : 1))}s"`
+      + (loop ? ` repeatCount="indefinite"` : ` fill="freeze"`)
+      + ` keyTimes="0;${m};1"` + CURVE[p.timing];
+    const moving = p.motion !== "none";
+    const anim = moving
+      ? `<animateTransform attributeName="transform" type="translate" additive="sum"`
+        + ` values="${off};0 0;0 0" ${timing}/>`
+      : "";
+    const morph = (from, to) => moving && from !== to
+      ? `<animate attributeName="d" values="${from};${to};${to}" ${timing}/>` : "";
+
     let acc = 0;
     const rings = p.cwidth
       ? pal.map(c => { acc += (p.cwidth / sc) * (0.4 + rnd2() * 1.2); return {c, w: acc}; }).reverse()
       : [];
     if (kind === "hook") {
-      const shaft = `M${f(Math.max(0.2, 0.95 * sl))} 0.6 L0 0.6 A0.6 0.6 0 0 1 -0.6 0`;
+      const hookShaft = s => `M${f(Math.max(0.2, 0.95 * s))} 0.6 L0 0.6 A0.6 0.6 0 0 1 -0.6 0`;
+      const shaft = hookShaft(sl), shaft0 = hookShaft(sl0), sm = morph(shaft0, shaft);
       const swv = f(1.3 * sw);
       const head = `M${f(-0.6 - 0.55 * hw)} 0 L${f(-0.6 + 0.55 * hw)} 0 L-0.6 ${f(-0.7 * hw)} Z`;
-      inner.push(`<g data-i="${i}" transform="${tf}">`
+      inner.push(`<g data-i="${i}" transform="${pos}">${anim}<g transform="${loc}">`
         + rings.map(r =>
-            `<path d="${shaft}" fill="none" stroke="${r.c}" stroke-width="${f3(swv + 2 * r.w)}"/>`
+            `<path d="${shaft}" fill="none" stroke="${r.c}" stroke-width="${f3(swv + 2 * r.w)}">${sm}</path>`
           + `<path d="${head}" fill="none" stroke="${r.c}" stroke-width="${f3(2 * r.w)}" stroke-linejoin="round"/>`).join("")
-        + `<path d="${shaft}" fill="none" stroke="${p.color}" stroke-width="${swv}"/>`
-        + `<path d="${head}" fill="${p.color}"/></g>`);
+        + `<path d="${shaft}" fill="none" stroke="${p.color}" stroke-width="${swv}">${sm}</path>`
+        + `<path d="${head}" fill="${p.color}"/></g></g>`);
     } else {
       const d = GEN[kind](hl, hw, sw, sl);
-      inner.push(`<g data-i="${i}">`
+      const dm = morph(GEN[kind](hl, hw, sw, sl0), d);
+      inner.push(`<g data-i="${i}" transform="${pos}">${anim}`
         + rings.map(r =>
-          `<path d="${d}" fill="none" stroke="${r.c}" stroke-width="${f3(2 * r.w)}" stroke-linejoin="round" transform="${tf}"/>`).join("")
-        + `<path d="${d}" fill="${p.color}" transform="${tf}"/></g>`);
+          `<path d="${d}" fill="none" stroke="${r.c}" stroke-width="${f3(2 * r.w)}" stroke-linejoin="round" transform="${loc}">${dm}</path>`).join("")
+        + `<path d="${d}" fill="${p.color}" transform="${loc}">${dm}</path></g>`);
     }
   }
   // z-order: persisted permutation, last = topmost; sanitize against count
@@ -379,24 +434,29 @@ function render() {
   stage.innerHTML = art.svg;
   for (const g of stage.querySelectorAll("g[data-i]")) g.style.cursor = "pointer";
   applyZoom();
-  document.getElementById("dlsvg").href =
-    URL.createObjectURL(new Blob([art.svg], {type: "image/svg+xml"}));
-  document.getElementById("dlsvg").download = `arrows-${p.seed}.svg`;
 }
-document.getElementById("dlpng").addEventListener("click", async e => {
+document.getElementById("dlsvg").addEventListener("click", () =>
+  saveAs(`arrows-${p.seed}.svg`, new Blob([art.svg], {type: "image/svg+xml"})));
+document.getElementById("dldir").addEventListener("click", async e => {
   const a = e.currentTarget;
-  if (a.dataset.ready) { delete a.dataset.ready; return; }   // second pass = real download
-  e.preventDefault();
+  try {
+    await pickExportDir();
+    a.textContent = "📁 " + (exportDirName() || "…");
+    a.title = exportDirName() ? `exporting to ${exportDirName()}` : "choose export folder";
+  } catch (err) {
+    a.textContent = "📁 ✗";
+    a.title = err.message;      // hover the button to see why
+    console.warn("export folder:", err);
+  }
+});
+document.getElementById("dlpng").addEventListener("click", async () => {
   const img = new Image();
   img.src = URL.createObjectURL(new Blob([art.svg], {type: "image/svg+xml"}));
   await img.decode();
   const c = document.createElement("canvas");
   c.width = art.w; c.height = art.h;   // export = exact artboard pixels
   c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-  a.href = c.toDataURL("image/png");
-  a.download = `arrows-${p.seed}.png`;
-  a.dataset.ready = 1;
-  a.click();
+  c.toBlob(b => saveAs(`arrows-${p.seed}.png`, b), "image/png");
 });
 render();
 
