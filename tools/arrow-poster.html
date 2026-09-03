@@ -26,6 +26,9 @@
 <script>
 // ---------- parameters ----------
 const DEFS = [
+  ["ratio",  "select", {options: ["2:3", "3:4", "4:5", "1:1", "9:16"], value: "3:4", label: "aspect"}],
+  ["orient", "select", {options: ["portrait", "landscape"], value: "portrait", label: "orientation"}],
+  ["res",    "select", {options: ["1000", "2000", "4000"], value: "2000", label: "export px"}],
   ["seed",   "range", {min: 1, max: 9999, step: 1, value: 42}],
   ["count",  "range", {min: 1, max: 15, step: 1, value: 6, label: "arrows"}],
   ["size",   "range", {min: 40, max: 200, step: 5, value: 100, label: "scale %"}],
@@ -39,7 +42,6 @@ const DEFS = [
   ["snap",   "select", {options: ["free", "45°", "90°"], value: "45°", label: "rotation"}],
   ["color",  "color", {value: "#e84f5e", label: "arrow color"}],
   ["paper",  "color", {value: "#f4f1ea", label: "paper"}],
-  ["ratio",  "select", {options: ["3:4", "2:3", "1:1", "4:3", "3:2", "16:9"], value: "3:4", label: "aspect"}],
   ["cwidth", "range", {min: 0, max: 16, step: 0.5, value: 4, label: "contour px"}],
   ["gradA",  "color", {value: "#1c1c1c", label: "gradient start"}],
   ["gradB",  "color", {value: "#f5c518", label: "gradient end"}],
@@ -131,9 +133,10 @@ const gradient = (a, b) => {
 
 // ---------- generator (same as the pi-ui widget) ----------
 function makeSVG() {
-  const [rw, rh] = p.ratio.split(":").map(Number);
+  let [rw, rh] = p.ratio.split(":").map(Number);
+  if ((p.orient === "landscape") !== (rw > rh)) [rw, rh] = [rh, rw];
   const k = 1000 / Math.max(rw, rh);
-  const W = Math.round(rw * k), H = Math.round(rh * k), M = 28;
+  const W = Math.round(rw * k), H = Math.round(rh * k);
   const mulberry = s => () => {
     s |= 0; s = (s + 0x6D2B79F5) | 0;
     let t = Math.imul(s ^ (s >>> 15), 1 | s);
@@ -162,7 +165,7 @@ function makeSVG() {
     tri: (hl, hw, sw) => `M0 -1.1 L${f(hw)} 0.8 L${f(-hw)} 0.8 Z`
   };
   const kinds = p.kinds.length ? p.kinds : KINDS;
-  const pw = W - 2 * M, ph = H - 2 * M;
+  const pw = W, ph = H;
   const parts = [`<rect width="${W}" height="${H}" fill="${p.paper}"/>`];
   const inner = [];
 
@@ -215,7 +218,7 @@ function makeSVG() {
         + `<path d="${d}" fill="${p.color}" transform="${tf}"/>`);
     }
   }
-  parts.push(`<svg x="${M}" y="${M}" width="${pw}" height="${ph}">${inner.join("")}</svg>`);
+  parts.push(...inner);
   return {w: W, h: H, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`};
 }
 
@@ -238,7 +241,8 @@ document.getElementById("dlpng").addEventListener("click", async e => {
   img.src = URL.createObjectURL(new Blob([art.svg], {type: "image/svg+xml"}));
   await img.decode();
   const c = document.createElement("canvas");
-  c.width = 2 * art.w; c.height = 2 * art.h;
+  const px = +p.res / Math.max(art.w, art.h);
+  c.width = Math.round(px * art.w); c.height = Math.round(px * art.h);
   c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
   a.href = c.toDataURL("image/png");
   a.download = `arrows-${p.seed}.png`;
