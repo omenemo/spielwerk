@@ -223,6 +223,7 @@ let art;
 function render() {
   localStorage.setItem("arrow-poster", JSON.stringify(p));
   art = makeSVG();
+  stage.style.background = p.frame ? "#1c1c1c" : "";
   stage.innerHTML = art.svg;
   document.getElementById("dlsvg").href =
     URL.createObjectURL(new Blob([art.svg], {type: "image/svg+xml"}));
