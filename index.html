@@ -7,38 +7,72 @@
   body { font: 13px/1.5 system-ui, sans-serif; margin: 0; display: flex; min-height: 100vh; background: #e9e7e2; }
   #panel { width: 260px; padding: 18px; background: #fff; border-right: 1px solid #ddd;
            box-sizing: border-box; flex-shrink: 0; }
-  h1 { font-size: 14px; margin: 0 0 6px; }
-  #intro { color: #444; margin: 0 0 16px; }
+  h1 { font-size: 14px; margin: 0 0 12px; }
   #panel select { width: 100%; padding: 6px; border-radius: 8px; border: 1px solid #ccc;
                   background: #fff; font: inherit; }
   #panel label { display: block; color: #444; margin-bottom: 4px; }
-  #desc { color: #999; margin-top: 10px; }
-  #stage { flex: 1; display: flex; }
+  #stage { flex: 1; display: flex; position: relative; }
   #stage iframe { flex: 1; border: none; }
+  #about { position: absolute; top: 32px; left: 40px; width: 300px; background: #fff;
+           border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.25); overflow: hidden; }
+  #about header { display: flex; align-items: center; justify-content: space-between;
+                  padding: 8px 12px; background: #1c1c1c; color: #f4f1ea; cursor: grab;
+                  user-select: none; touch-action: none; }
+  #about header:active { cursor: grabbing; }
+  #about header button { border: none; background: none; color: #f4f1ea; font-size: 14px;
+                         cursor: pointer; padding: 0 2px; }
+  #about .body { padding: 12px 14px; }
+  #about .body p { margin: 0 0 10px; color: #444; }
+  #about .body p:last-child { margin: 0; color: #999; }
 </style>
 <body>
 <div id="panel">
   <h1>spielwerk</h1>
-  <p id="intro">A collection of small parametric design tools.
-    Each tool is a single self-contained page: sliders on the left,
-    live vector preview on the right, SVG and PNG export built in.
-    Pick one below — everything runs in your browser.</p>
   <label for="pick">tool</label>
   <select id="pick"></select>
-  <p id="desc"></p>
 </div>
-<div id="stage"><iframe id="frame" title="tool"></iframe></div>
+<div id="stage">
+  <iframe id="frame" title="tool"></iframe>
+  <div id="about">
+    <header id="grab"><span id="aname"></span><button id="close" aria-label="close">✕</button></header>
+    <div class="body">
+      <p>A collection of small parametric design tools. Each tool is a single
+         self-contained page: sliders on the left, live vector preview on the
+         right, SVG and PNG export built in. Everything runs in your browser.</p>
+      <p id="desc"></p>
+    </div>
+  </div>
+</div>
 <script>
+  const $ = id => document.getElementById(id);
+
   fetch("tools.json").then(r => r.json()).then(tools => {
-    const pick = document.getElementById("pick");
-    for (const t of tools) pick.append(new Option(t.name, t.file));
+    for (const t of tools) $("pick").append(new Option(t.name, t.file));
     const load = () => {
-      const t = tools[pick.selectedIndex];
-      document.getElementById("frame").src = t.file;
-      document.getElementById("desc").textContent = t.desc;
+      const t = tools[$("pick").selectedIndex];
+      $("frame").src = t.file;
+      $("aname").textContent = t.name;
+      $("desc").textContent = t.desc;
+      $("about").style.display = "";        // reopen on tool switch
     };
-    pick.addEventListener("input", load);
+    $("pick").addEventListener("input", load);
     load();
+  });
+
+  $("close").addEventListener("click", () => $("about").style.display = "none");
+
+  // drag via pointer capture — keeps events even over the iframe
+  $("grab").addEventListener("pointerdown", e => {
+    if (e.target.tagName === "BUTTON") return;
+    const box = $("about"), r = box.getBoundingClientRect(), s = $("stage").getBoundingClientRect();
+    const dx = e.clientX - r.left, dy = e.clientY - r.top;
+    const move = ev => {
+      box.style.left = Math.max(0, Math.min(ev.clientX - s.left - dx, s.width - r.width)) + "px";
+      box.style.top  = Math.max(0, Math.min(ev.clientY - s.top - dy, s.height - 36)) + "px";
+    };
+    $("grab").setPointerCapture(e.pointerId);
+    $("grab").addEventListener("pointermove", move);
+    $("grab").addEventListener("pointerup", () => $("grab").removeEventListener("pointermove", move), {once: true});
   });
 </script>
 </body>
