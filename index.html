@@ -51,7 +51,9 @@
   // tool manifest — add a line per tool
   const tools = [
     { file: "tools/arrow-poster.html", name: "Arrow Poster",
-      desc: "Parametric arrow compositions on a portrait artboard. Grid placement, stacked contours, SVG/PNG export." }
+      desc: "Parametric arrow compositions on a portrait artboard. Grid placement, stacked contours, SVG/PNG export." },
+    { file: "tools/truchet-tiles.html", name: "Truchet Tiles",
+      desc: "Classic Truchet tilings — quarter-circle arcs, triangles, or 10 PRINT diagonals on a square grid. Multi-strand arcs, duotone inks, SVG/PNG export." }
   ];
 
   for (const t of tools) $("pick").append(new Option(t.name, t.file));
