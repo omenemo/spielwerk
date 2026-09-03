@@ -10,5 +10,5 @@ no build, no dependencies, works from `file://` or any static host.
 
 ## Hosting
 
-GitHub Pages, from the repo root of `main`. The index reads `tools.json`
-and renders the gallery.
+GitHub Pages, from the repo root of `main`. The index lists tools from
+its inline manifest.
