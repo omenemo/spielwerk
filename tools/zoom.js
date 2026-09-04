@@ -24,6 +24,9 @@
     onChange = () => {},         // persist the new zoom
   }) {
     let mode = zoom === "fit" || typeof zoom === "number" ? zoom : "fit";
+    // phones open fit-to-screen whatever percent the desktop session saved —
+    // a stored 200% on a 390px screen shows one corner of the artboard
+    if (matchMedia("(max-width: 720px)").matches) mode = "fit";
     const target = () => stage.firstElementChild;
 
     // null = stage not laid out yet, so any fit would be a guess
