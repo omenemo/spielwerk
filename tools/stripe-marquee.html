@@ -59,12 +59,18 @@
 // ---------- parameters ----------
 const DEFS = [
   ["text",   "text",   {value: "NEXUM", label: "text"}],
+  ["fontsize","range", {min: 8, max: 1200, step: 1, value: 300, label: "font size px"}],
+  ["fit",    "select", {options: ["free", "fit width"], value: "free", label: "size mode"}],
+  ["lineh",  "range",  {min: 20, max: 400, step: 1, value: 110, label: "line height %"}],
+  ["xscale", "range",  {min: 1, max: 400, step: 1, value: 100, label: "x scale %"}],
+  ["yscale", "range",  {min: 1, max: 400, step: 1, value: 100, label: "y scale %"}],
+  ["weight", "select", {options: ["100", "200", "300", "400", "500", "600", "700", "800", "900"],
+                        value: "900", label: "font weight"}],
+  ["basex",  "range",  {min: -100, max: 100, step: 1, value: 0, label: "baseline x %"}],
+  ["basey",  "range",  {min: -100, max: 100, step: 1, value: 0, label: "baseline y %"}],
+  ["track",  "range",  {min: -20, max: 200, step: 1, value: 0, label: "tracking %"}],
+  ["gapx",   "range",  {min: 0, max: 300, step: 5, value: 40, label: "word gap %"}],
   ["seed",   "range",  {min: 1, max: 9999, step: 1, value: 42}],
-  ["size",   "range",  {min: 5, max: 120, step: 1, value: 26, label: "type size %"}],
-  ["reps",   "range",  {min: 1, max: 8, step: 1, value: 1, label: "per line"}],
-  ["gap",    "range",  {min: 60, max: 300, step: 5, value: 110, label: "line height %"}],
-  ["fit",    "select", {options: ["stretch", "space"], value: "stretch", label: "fit to width"}],
-  ["weight", "select", {options: ["400", "700", "900"], value: "900", label: "weight"}],
   ["motion", "select", {options: ["up", "down", "left", "right", "none"], value: "up"}],
   ["secs",   "range",  {min: 1, max: 40, step: 0.5, value: 12, label: "cycle sec"}],
   ["paper",  "color",  {value: "#000000", label: "paper"}],
@@ -165,6 +171,7 @@ for (const [key, type, opt] of DEFS) {
   label.append(name);
   let input;
   if (type === "select") {
+    if (!opt.options.includes(p[key])) p[key] = opt.value;   // stale value from an older build
     input = document.createElement("select");
     for (const o of opt.options) input.append(new Option(o, o, o === p[key], o === p[key]));
   } else {
@@ -185,43 +192,53 @@ for (const [key, type, opt] of DEFS) {
 }
 
 // ---------- type mask ----------
-// The marquee repeats every (W, LH), so a single tile IS the whole type field:
-// scrolling only moves the sample point, so one raster serves every frame.
-// Canvas keeps it synchronous, and the exported SVG carries no <text> at all —
-// nothing to embed, nothing to substitute on another machine.
-const MW = 480;                                  // mask columns across the artboard
+// The tile is one REPEAT of the line (adv × LH), not the artboard. Type is drawn at
+// its own size and tiles across the page, so glyphs keep their proportions — the old
+// mask stretched every line to the board width, which is why nothing had a real size.
+// Scrolling only moves the sample point, so one raster still serves every frame, and
+// the exported SVG carries no <text> at all: nothing to embed, nothing to substitute.
+const MW = 512;                                  // mask columns across one tile
+const FAM = `"Helvetica Neue", Helvetica, Arial, sans-serif`;
 let maskKey = "", maskData = null;
 function typeMask() {
-  const W = p.wpx, fs = W * p.size / 100, LH = Math.max(4, fs * p.gap / 100);
-  const key = [p.text, p.size, p.gap, p.weight, p.fit, p.reps, W].join("|");
+  const key = [p.text, p.fontsize, p.fit, p.lineh, p.xscale, p.yscale, p.weight,
+               p.basex, p.basey, p.track, p.gapx, p.wpx].join("|");
   if (key === maskKey) return maskData;
-  const mw = MW, mh = Math.max(1, Math.round(MW * LH / W));
+  const sx = Math.max(1, p.xscale) / 100, sy = Math.max(1, p.yscale) / 100;
+  const line = p.text || " ";
+
+  // Measure once at 100px: width scales linearly with size because tracking is a
+  // percentage of it, so "fit width" is one division instead of a search.
+  const meas = document.createElement("canvas").getContext("2d");
+  meas.font = `${p.weight} 100px ${FAM}`;
+  meas.letterSpacing = `${p.track}px`;
+  const w100 = Math.max(1, meas.measureText(line).width);
+  const fs = p.fit === "fit width"
+    ? Math.min(5000, p.wpx * 100 / (w100 * sx))  // fills the board, still undistorted
+    : p.fontsize;
+
+  const w0 = w100 * fs / 100;                    // natural line width at this size
+  const LH = Math.max(1, fs * sy * p.lineh / 100);
+  const adv = Math.max(1, w0 * sx + fs * sx * p.gapx / 100);
+  const mw = MW, mh = Math.min(2048, Math.max(1, Math.round(MW * LH / adv)));
   const c = document.createElement("canvas");
   c.width = mw; c.height = mh;
   const g = c.getContext("2d", {willReadFrequently: true});
-  g.scale(mw / W, mw / W);                       // draw in artboard units
+  g.setTransform(mw / adv, 0, 0, mh / LH, 0, 0);  // draw in tile units
   g.fillStyle = "#fff";
-  g.font = `${p.weight} ${fs}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
-  const line = Array.from({length: p.reps}, () => p.text || " ").join("  ");
-  const base = fs * 0.78;                        // ~cap-height baseline inside the tile
-  for (const dy of [-LH, 0, LH]) {               // 3 passes: ascenders/descenders wrap in
-    if (p.fit === "space") {
-      g.letterSpacing = "0px";
-      const w0 = g.measureText(line).width;
-      g.letterSpacing = `${(W - w0) / Math.max(1, line.length - 1)}px`;
-      g.fillText(line, 0, base + dy);
-      g.letterSpacing = "0px";
-    } else {
-      const w0 = g.measureText(line).width || 1;  // measureText ignores the CTM
-      g.save(); g.scale(W / w0, 1); g.fillText(line, 0, base + dy); g.restore();
-    }
-  }
-  const d = g.getImageData(0, 0, mw, mh).data;
+  const k = sx / sy;      // y-scale rides the font size; x-scale is the leftover stretch
+  g.transform(k, 0, 0, 1, 0, 0);
+  g.font = `${p.weight} ${fs * sy}px ${FAM}`;
+  g.letterSpacing = `${p.track / 100 * fs * sy}px`;
+  const bx = p.basex / 100 * adv, by = fs * sy * 0.78 + p.basey / 100 * LH;
+  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++)
+    g.fillText(line, (bx + i * adv) / k, by + j * LH);   // 3×3: overhang wraps back in
+  const d = g.getImageData(0, 0, mw, mh).data;   // getImageData ignores the CTM
   const a = new Float32Array(mw * mh);
   for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3] / 255;   // alpha is the mask
   maskKey = key;
-  return maskData = {LH, a, canvas: c, at(x, y) {
-    const u = ((x / W) % 1 + 1) % 1, v = ((y / LH) % 1 + 1) % 1;
+  return maskData = {LH, adv, fs, a, canvas: c, at(x, y) {
+    const u = ((x / adv) % 1 + 1) % 1, v = ((y / LH) % 1 + 1) % 1;
     return a[Math.min(mh - 1, (v * mh) | 0) * mw + Math.min(mw - 1, (u * mw) | 0)];
   }};
 }
@@ -229,11 +246,11 @@ function typeMask() {
 // Where the type field sits at this moment. Shared by the filter and the type
 // preview — if these two ever computed it separately, the preview would quietly
 // stop showing what the filter actually samples, which is the one thing it is for.
-function scrollAt(time, LH) {
+function scrollAt(time, m) {
   const horiz = p.motion === "left" || p.motion === "right";
   const dir = {up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0], none: [0, 0]}[p.motion];
   const phase = time === null ? 0 : ((time / p.secs) % 1 + 1) % 1;
-  const period = horiz ? p.wpx : LH;
+  const period = horiz ? m.adv : m.LH;      // one repeat of the line, not the board
   return {tx: dir[0] * period * phase, ty: dir[1] * period * phase, period, phase};
 }
 
@@ -252,7 +269,7 @@ function makeSVG(time = null) {
   const m = typeMask();
 
   // ---- scroll: the type field slides one full period, so the loop is seamless ----
-  const {tx, ty, period, phase} = scrollAt(time, m.LH);
+  const {tx, ty, period, phase} = scrollAt(time, m);
 
   // ---- stripe filter: fractal columns, sampled row by row ----
   // ONE set of cuts for the whole page, so a column is continuous top to bottom
@@ -345,13 +362,13 @@ function drawPeek(time) {
   const g = peek.getContext("2d");
   g.fillStyle = p.paper;
   g.fillRect(0, 0, pw, ph);
-  const {tx, ty} = scrollAt(time, m.LH);
-  const s = pw / W, tileH = m.LH * s;
-  if (tileH < 1) return;                             // type finer than a preview pixel
+  const {tx, ty} = scrollAt(time, m);
+  const s = pw / W, tileW = m.adv * s, tileH = m.LH * s;
+  if (tileW < 1 || tileH < 1) return;                // type finer than a preview pixel
   const wrap = (v, n) => ((v % n) + n) % n - n;      // start one tile off-screen
   for (let y = wrap(ty * s, tileH); y < ph; y += tileH)
-    for (let x = wrap(tx * s, pw); x < pw; x += pw)
-      g.drawImage(m.canvas, x, y, pw, tileH);
+    for (let x = wrap(tx * s, tileW); x < pw; x += tileW)
+      g.drawImage(m.canvas, x, y, tileW, tileH);
 }
 
 function draw(time) {
