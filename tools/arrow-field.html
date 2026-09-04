@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Arrow Field — parametric generator</title>
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  body { font: 13px/1.4 system-ui, sans-serif; margin: 0; display: flex; background: #e9e7e2; }
+  #panel { width: 264px; margin: 16px; padding: 14px 18px; background: #fff; border-radius: 8px;
+           box-shadow: 0 2px 12px rgba(0,0,0,.15); box-sizing: border-box; flex-shrink: 0;
+           align-self: flex-start; max-height: calc(100vh - 32px); overflow-y: auto; }
+  #panel label { display: grid; grid-template-columns: 90px 1fr 38px; align-items: center; margin: 10px 0; gap: 6px; }
+  #panel label span:first-child { color: #444; }
+  #panel input[type=range] { width: 100%; min-width: 0; margin: 0; }
+  #panel input[type=color], #panel select, #panel input[type=checkbox] { justify-self: end; grid-column: 2 / 4; }
+  #panel output { text-align: right; font-variant-numeric: tabular-nums; }
+  #stage { flex: 1; display: flex; overflow: auto; padding: 32px; }
+  #stage svg { display: block; margin: auto; flex-shrink: 0; box-shadow: 0 4px 24px rgba(0,0,0,.18); }
+  #panel input[type=number] { width: 58px; box-sizing: border-box; font: inherit; }
+  #viewbox { position: fixed; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px;
+             background: #fff; border-radius: 8px; padding: 8px 12px; box-shadow: 0 2px 12px rgba(0,0,0,.15); }
+  #viewbox span { color: #444; }
+  #viewbox select { font: inherit; padding: 3px 6px; }
+  .btns { display: flex; gap: 8px; margin-top: 16px; }
+  .btns a { flex: 1; text-align: center; padding: 7px 0; border-radius: 8px; background: #3b82f6; color: #fff; text-decoration: none; cursor: pointer; }
+  .btns select { font: inherit; padding: 4px 6px; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
+  h1 { font-size: 14px; margin: 0 0 6px; }
+</style>
+<body>
+<div id="panel">
+  <h1>Arrow Field</h1>
+  <div id="controls"></div>
+  <div class="btns">
+    <select id="fmt" title="file type"></select>
+    <a id="dl">⬇ export</a>
+    <a id="dldir" title="choose export folder">📁 …</a>
+  </div>
+</div>
+<div id="stage"></div>
+<div id="viewbox">
+  <span>view</span>
+  <select id="zoom">
+    <option value="fit">scale to fit</option>
+    <option>10%</option><option>25%</option><option>50%</option><option>75%</option>
+    <option>100%</option><option>150%</option><option>200%</option>
+  </select>
+</div>
+<script src="export.js"></script>
+<script src="zoom.js"></script>
+<script>
+// ---------- parameters ----------
+const DEFS = [
+  ["seed",   "range", {min: 1, max: 9999, step: 1, value: 42}],
+  ["cols",   "range", {min: 2, max: 60, step: 1, value: 14, label: "arrows across"}],
+  ["field",  "select", {options: ["noise", "swirl", "radial", "grid"], value: "noise"}],
+  ["scale",  "range", {min: 1, max: 40, step: 1, value: 8, label: "field scale"}],
+  ["turns",  "range", {min: 1, max: 8, step: 1, value: 2, label: "turns"}],
+  ["snap",   "range", {min: 0, max: 12, step: 1, value: 0, label: "snap to n dirs"}],
+  ["shape",  "select", {options: ["solid", "line"], value: "solid"}],
+  ["len",    "range", {min: 20, max: 140, step: 5, value: 55, label: "length %"}],
+  ["stroke", "range", {min: 2, max: 40, step: 1, value: 12, label: "thickness %"}],
+  ["head",   "range", {min: 0, max: 80, step: 5, value: 40, label: "head %"}],
+  ["jitter", "range", {min: 0, max: 100, step: 5, value: 0, label: "jitter %"}],
+  ["motion", "select", {options: ["none", "wave", "spin", "random"], value: "wave"}],
+  ["secs",   "range", {min: 1, max: 30, step: 1, value: 8, label: "turn secs"}],
+  ["pull",   "range", {min: -100, max: 100, step: 5, value: 100, label: "pointer pull %"}],
+  ["reach",  "range", {min: 5, max: 200, step: 5, value: 70, label: "pointer reach %"}],
+  ["grav",   "range", {min: 20, max: 400, step: 10, value: 100, label: "gravity falloff %"}],
+  ["fps",    "range", {min: 5, max: 30, step: 1, value: 20, label: "gif fps"}],
+  ["gifpx",  "range", {min: 200, max: 1000, step: 50, value: 600, label: "gif px"}],
+  ["ink",    "color", {value: "#ffffff", label: "ink"}],
+  ["ink2",   "color", {value: "#e84f5e", label: "second ink"}],
+  ["duo",    "range", {min: 0, max: 100, step: 5, value: 0, label: "second ink %"}],
+  ["paper",  "color", {value: "#0d0d0d", label: "paper"}]
+];
+const p = {};
+const saved = JSON.parse(localStorage.getItem("arrow-field") || "{}");
+const controls = document.getElementById("controls");
+
+// ---------- artboard size (exact pixels) ----------
+p.wpx = +saved.wpx || 1500;
+p.hpx = +saved.hpx || 2000;
+{
+  const wIn = Object.assign(document.createElement("input"), {type: "number", min: 100, max: 8000, value: p.wpx});
+  const hIn = Object.assign(document.createElement("input"), {type: "number", min: 100, max: 8000, value: p.hpx});
+  const preset = document.createElement("select");
+  for (const o of ["custom", "2:3", "3:4", "4:5", "1:1", "9:16"]) preset.append(new Option(o, o));
+  const swap = Object.assign(document.createElement("button"), {textContent: "⇄", title: "swap width/height"});
+  swap.style.cssText = "font:inherit;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer";
+  p.lock = saved.lock ?? false;
+  const lock = Object.assign(document.createElement("button"), {title: "lock aspect ratio"});
+  lock.style.cssText = "font:inherit;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer";
+  const drawLock = () => { lock.textContent = p.lock ? "🔒" : "🔓"; lock.style.background = p.lock ? "#eef" : "#fff"; };
+  drawLock();
+  lock.addEventListener("click", () => { p.lock = !p.lock; drawLock(); localStorage.setItem("arrow-field", JSON.stringify(p)); });
+
+  const sizeRow = document.createElement("label");
+  sizeRow.style.cssText = "display:flex;justify-content:space-between;align-items:center";
+  sizeRow.innerHTML = "<span>artboard px</span>";
+  const sizeBox = document.createElement("span");
+  sizeBox.style.cssText = "display:flex;align-items:center;gap:4px";
+  sizeBox.append(wIn, "×", hIn, lock);
+  sizeRow.append(sizeBox);
+
+  const presetRow = document.createElement("label");
+  presetRow.innerHTML = "<span>aspect</span>";
+  const presetBox = document.createElement("span");
+  presetBox.style.cssText = "display:flex;align-items:center;gap:6px;grid-column:2/4;justify-self:end";
+  presetBox.append(preset, swap);
+  presetRow.append(presetBox);
+
+  let ratio = p.hpx / p.wpx;                     // locked aspect, frozen at lock time
+  lock.addEventListener("click", () => { if (p.lock) ratio = p.hpx / p.wpx; });
+  const apply = soft => {
+    p.wpx = Math.max(100, Math.min(8000, +wIn.value || p.wpx));
+    p.hpx = Math.max(100, Math.min(8000, +hIn.value || p.hpx));
+    if (!soft) { wIn.value = p.wpx; hIn.value = p.hpx; ratio = p.hpx / p.wpx; }
+    render();                                    // render() persists — saves on every keystroke
+  };
+  const onEdit = (src, other, factor) => soft => {
+    if (p.lock) other.value = Math.round((+src.value || 100) * factor());
+    else preset.value = "custom";
+    apply(soft);
+  };
+  const wEdit = onEdit(wIn, hIn, () => ratio), hEdit = onEdit(hIn, wIn, () => 1 / ratio);
+  wIn.addEventListener("input", () => wEdit(true));    // live: saves while typing, no clamp-fight
+  wIn.addEventListener("change", () => wEdit(false));  // commit: normalize the field
+  hIn.addEventListener("input", () => hEdit(true));
+  hIn.addEventListener("change", () => hEdit(false));
+  preset.addEventListener("input", () => {
+    if (preset.value === "custom") return;
+    const [a, b] = preset.value.split(":").map(Number);
+    hIn.value = Math.round(p.wpx * b / a);   // width is the anchor
+    apply();
+  });
+  swap.addEventListener("click", () => {
+    [wIn.value, hIn.value] = [hIn.value, wIn.value];
+    preset.value = "custom";
+    apply();
+  });
+  controls.append(sizeRow, presetRow);
+}
+
+for (const [key, type, opt] of DEFS) {
+  p[key] = key in saved ? saved[key] : opt.value;
+  const label = document.createElement("label");
+  const name = document.createElement("span");
+  name.textContent = opt.label || key;
+  label.append(name);
+  let input;
+  if (type === "select") {
+    input = document.createElement("select");
+    for (const o of opt.options) input.append(new Option(o, o, o === p[key], o === p[key]));
+  } else {
+    input = document.createElement("input");
+    input.type = type;
+    if (type === "range") Object.assign(input, {min: opt.min, max: opt.max, step: opt.step});
+    input.value = p[key];
+  }
+  label.append(input);
+  let out;
+  if (type === "range") { out = document.createElement("output"); out.value = p[key]; label.append(out); }
+  input.addEventListener("input", () => {
+    p[key] = type === "range" ? +input.value : input.value;
+    if (out) out.value = input.value;
+    render();
+  });
+  controls.append(label);
+}
+
+// ---------- generator ----------
+// time === null → live SMIL animation. A number bakes that instant statically
+// (GIF frames), so both paths share one generator.
+function makeSVG(time = null) {
+  const W = p.wpx, H = p.hpx;
+  const mulberry = s => () => {
+    s |= 0; s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const rnd = mulberry(p.seed);
+  const f = n => +n.toFixed(2);
+  const s = W / p.cols;                          // square cell side
+  const rows = Math.max(1, Math.round(H / s));
+
+  // value noise on an integer lattice, smoothstep-interpolated
+  const hash = (x, y) => {
+    let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(p.seed, 2246822519);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  };
+  const sm = t => t * t * (3 - 2 * t);
+  const noise = (x, y) => {
+    const xi = Math.floor(x), yi = Math.floor(y), u = sm(x - xi), v = sm(y - yi);
+    const top = hash(xi, yi) + (hash(xi + 1, yi) - hash(xi, yi)) * u;
+    const bot = hash(xi, yi + 1) + (hash(xi + 1, yi + 1) - hash(xi, yi + 1)) * u;
+    return top + (bot - top) * v;
+  };
+
+  const L = s * (p.len / 100);                   // arrow length
+  const sw = f(Math.max(0.5, s * (p.stroke / 100)));
+  const hd = L * (p.head / 100) / 2;             // head leg length
+  const cxF = p.cols / 2, cyF = rows / 2;
+
+  // one arrow along +x, centred on the origin. solid: shaft bar + triangle head
+  // (single filled outline); line: stroked shaft + two head legs.
+  const t = sw / 2, hw = Math.max(t * 1.8, hd * 0.8), xh = L / 2 - hd;
+  const arrow = p.shape === "solid" && hd > 0
+    ? `M${f(-L / 2)} ${f(-t)} L${f(xh)} ${f(-t)} L${f(xh)} ${f(-hw)} L${f(L / 2)} 0` +
+      ` L${f(xh)} ${f(hw)} L${f(xh)} ${f(t)} L${f(-L / 2)} ${f(t)} Z`
+    : `M${f(-L / 2)} 0 H${f(L / 2)}` +
+      (hd > 0 ? `M${f(xh)} ${f(-hw * 0.9)} L${f(L / 2)} 0 L${f(xh)} ${f(hw * 0.9)}` : "");
+  const paint = p.shape === "solid" && hd > 0
+    ? c => `fill="${c}"`
+    : c => `fill="none" stroke="${c}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"`;
+
+  const parts = [`<rect width="${W}" height="${H}" fill="${p.paper}"/>`];
+  cells = [];
+  for (let row = 0; row < rows; row++) for (let col = 0; col < p.cols; col++) {
+    // fixed draws per cell — the stream stays aligned whatever field is set
+    const rDuo = rnd(), rJx = rnd(), rJy = rnd(), rMot = rnd();
+    let a;                                       // angle in turns (0..1)
+    if (p.field === "noise") a = noise(col / p.scale, row / p.scale) * p.turns;
+    else if (p.field === "swirl") a = Math.atan2(row - cyF, col - cxF) / (2 * Math.PI) + 0.25;
+    else if (p.field === "radial") a = Math.atan2(row - cyF, col - cxF) / (2 * Math.PI);
+    else a = 0;
+    if (p.snap) a = Math.round(a * p.snap) / p.snap;
+    const j = p.jitter / 100 * s / 2;
+    const cx = (col + 0.5) * s + (rJx * 2 - 1) * j;
+    const cy = (row + 0.5) * s + (rJy * 2 - 1) * j;
+    const color = rDuo < p.duo / 100 ? p.ink2 : p.ink;
+    // phase staggers the start: by field value (wave), uniform (spin), or random
+    const phase = p.motion === "wave" ? a - Math.floor(a) : p.motion === "random" ? rMot : 0;
+    let base = a * 360;
+    // baked frame: advance the spin to `time` by hand instead of via SMIL
+    if (time !== null && p.motion !== "none") base += ((time / p.secs + phase) % 1) * 360;
+    const deg = f(base);
+    let anim = "";
+    if (time === null && p.motion !== "none") {
+      // SMIL rotation — declarative, so it animates in the exported SVG too
+      anim = `<animateTransform attributeName="transform" type="rotate"`
+        + ` from="${deg}" to="${f(base + 360)}" dur="${p.secs}s"`
+        + ` begin="${f(-phase * p.secs)}s" repeatCount="indefinite"/>`;
+    }
+    // translate + pointer pull on the <g>, spin on the <path> — animateTransform
+    // owns the path's whole transform, so position must live on the parent
+    cells.push({cx, cy, base});
+    parts.push(`<g transform="translate(${f(cx)} ${f(cy)}) rotate(${f(pullDeg(cx, cy, base))})">`
+      + `<path transform="rotate(${deg})" d="${arrow}" ${paint(color)}>${anim}</path></g>`);
+  }
+  return {w: W, h: H, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`};
+}
+
+// ---------- pointer as centre of gravity ----------
+// ptr is in artboard coordinates, or null when the pointer is away
+let ptr = null, cells = [];
+function pullDeg(cx, cy, base) {
+  if (!ptr || !p.pull) return 0;
+  const dx = ptr.x - cx, dy = ptr.y - cy;
+  const R = p.reach / 100 * Math.max(p.wpx, p.hpx) / 2;
+  // falloff shape: 100% = linear ramp, low = broad flat field, high = tight knot
+  // at the cursor. Always 1 at the pointer and 0 at the reach, so the knob only
+  // bends the curve between them — it never changes strength or radius.
+  const falloff = Math.max(0, 1 - Math.hypot(dx, dy) / R) ** (p.grav / 100);
+  if (!falloff) return 0;
+  // negative pull points away instead of toward
+  const target = Math.atan2(dy, dx) * 180 / Math.PI + (p.pull < 0 ? 180 : 0);
+  let d = (target - base) % 360;                             // shortest way round
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  return d * falloff * Math.abs(p.pull) / 100;
+}
+// live update rewrites only the <g> transforms, so SMIL keeps running
+function applyPull() {
+  const gs = stage.querySelectorAll("svg > g");
+  for (let i = 0; i < gs.length && i < cells.length; i++) {
+    const c = cells[i];
+    gs[i].setAttribute("transform",
+      `translate(${c.cx.toFixed(2)} ${c.cy.toFixed(2)}) rotate(${pullDeg(c.cx, c.cy, c.base).toFixed(2)})`);
+  }
+}
+
+// ---------- render + export ----------
+const stage = document.getElementById("stage");
+const zoomEl = document.getElementById("zoom");
+p.zoom = saved.zoom === "fit" || typeof saved.zoom === "number" ? saved.zoom : "fit";
+let art;
+const view = createZoom({
+  stage, select: zoomEl, zoom: p.zoom,
+  size: () => ({w: art.w, h: art.h}),
+  onChange: z => { p.zoom = z; localStorage.setItem("arrow-field", JSON.stringify(p)); },
+});
+function render() {
+  localStorage.setItem("arrow-field", JSON.stringify(p));
+  art = makeSVG();
+  stage.innerHTML = art.svg;
+  view.apply();
+}
+// pointer over the artboard → artboard coordinates
+stage.addEventListener("pointermove", e => {
+  const svg = stage.querySelector("svg");
+  if (!svg || view.panning) return;             // space-drag = panning, not steering
+  const r = svg.getBoundingClientRect();
+  ptr = {x: (e.clientX - r.left) / r.width * art.w, y: (e.clientY - r.top) / r.height * art.h};
+  applyPull();
+});
+stage.addEventListener("pointerleave", () => { ptr = null; applyPull(); });
+
+async function exportGIF(setLabel) {
+  const scale = Math.min(1, p.gifpx / Math.max(art.w, art.h));
+  const w = Math.round(art.w * scale), h = Math.round(art.h * scale);
+  // one full loop of the spin; static art is a single frame
+  const n = p.motion === "none" ? 1 : Math.max(1, Math.round(p.secs * p.fps));
+  const frames = [];
+  try {
+    for (let i = 0; i < n; i++) {
+      setLabel(`… ${i + 1}/${n}`);
+      await new Promise(r => setTimeout(r));           // let the label repaint
+      frames.push(await rasterise(makeSVG(i / n * p.secs).svg, w, h));
+    }
+    setLabel("… encoding");
+    await new Promise(r => setTimeout(r));
+    const blob = encodeGIF(frames, {width: w, height: h, delay: Math.max(2, Math.round(100 / p.fps))});
+    await saveAs(`arrows-${p.seed}.gif`, blob);
+  } finally {
+    render();                                          // restore the live SVG
+  }
+}
+
+wireExport({
+  SVG: () => saveAs(`arrows-${p.seed}.svg`, svgBlob(art.svg)),
+  PNG: async () => saveAs(`arrows-${p.seed}.png`, await svgToPNG(art.svg, art.w, art.h)),
+  GIF: exportGIF,
+});
+
+render();
+
+// self-check: deterministic output for fixed params
+console.assert(makeSVG().svg === makeSVG().svg, "generator must be deterministic");
+</script>
+</body>
+</html>
