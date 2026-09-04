@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Stripe Marquee — parametric generator</title>
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  body { font: 13px/1.4 system-ui, sans-serif; margin: 0; display: flex; background: #e9e7e2; }
+  #panel { width: 264px; margin: 16px; padding: 14px 18px; background: #fff; border-radius: 8px;
+           box-shadow: 0 2px 12px rgba(0,0,0,.15); box-sizing: border-box; flex-shrink: 0;
+           align-self: flex-start; max-height: calc(100vh - 32px); overflow-y: auto; }
+  #panel label { display: grid; grid-template-columns: 90px 1fr 38px; align-items: center; margin: 10px 0; gap: 6px; }
+  #panel label span:first-child { color: #444; }
+  #panel input[type=range] { width: 100%; min-width: 0; margin: 0; }
+  #panel input[type=color], #panel select, #panel input[type=checkbox] { justify-self: end; grid-column: 2 / 4; }
+  #panel input[type=text] { grid-column: 2 / 4; min-width: 0; box-sizing: border-box; font: inherit; }
+  #panel output { text-align: right; font-variant-numeric: tabular-nums; }
+  #stage { flex: 1; display: flex; overflow: auto; padding: 32px; }
+  #stage svg { display: block; margin: auto; flex-shrink: 0; box-shadow: 0 4px 24px rgba(0,0,0,.18); }
+  #panel input[type=number] { width: 58px; box-sizing: border-box; font: inherit; }
+  #viewbox { position: fixed; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px;
+             background: #fff; border-radius: 8px; padding: 8px 12px; box-shadow: 0 2px 12px rgba(0,0,0,.15); }
+  #viewbox span { color: #444; }
+  #viewbox select { font: inherit; padding: 3px 6px; }
+  .btns { display: flex; gap: 8px; margin-top: 16px; }
+  .btns a { flex: 1; text-align: center; padding: 7px 0; border-radius: 8px; background: #3b82f6; color: #fff; text-decoration: none; cursor: pointer; }
+  .btns select { font: inherit; padding: 4px 6px; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
+  h1 { font-size: 14px; margin: 0 0 6px; }
+</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="stylesheet" href="mobile.css">
+<body>
+<div id="panel">
+  <h1>Stripe Marquee</h1>
+  <div id="controls"></div>
+  <div class="btns">
+    <select id="fmt" title="file type"></select>
+    <a id="dl">⬇ export</a>
+    <a id="dldir" title="choose export folder">📁 …</a>
+  </div>
+</div>
+<div id="stage"></div>
+<div id="viewbox">
+  <span>view</span>
+  <select id="zoom">
+    <option value="fit">scale to fit</option>
+    <option>10%</option><option>25%</option><option>50%</option><option>75%</option>
+    <option>100%</option><option>150%</option><option>200%</option>
+  </select>
+</div>
+<script src="export.js"></script>
+<script src="zoom.js"></script>
+<script src="mobile.js"></script>
+<script>
+// ---------- parameters ----------
+const DEFS = [
+  ["text",   "text",   {value: "NEXUM", label: "text"}],
+  ["seed",   "range",  {min: 1, max: 9999, step: 1, value: 42}],
+  ["size",   "range",  {min: 5, max: 120, step: 1, value: 26, label: "type size %"}],
+  ["reps",   "range",  {min: 1, max: 8, step: 1, value: 1, label: "per line"}],
+  ["gap",    "range",  {min: 60, max: 300, step: 5, value: 110, label: "line height %"}],
+  ["fit",    "select", {options: ["stretch", "space"], value: "stretch", label: "fit to width"}],
+  ["weight", "select", {options: ["400", "700", "900"], value: "900", label: "weight"}],
+  ["motion", "select", {options: ["up", "down", "left", "right", "none"], value: "up"}],
+  ["secs",   "range",  {min: 1, max: 40, step: 0.5, value: 12, label: "cycle sec"}],
+  ["paper",  "color",  {value: "#000000", label: "paper"}],
+  ["rows",   "range",  {min: 1, max: 120, step: 1, value: 44, label: "grid rows"}],
+  ["skew",   "range",  {min: -60, max: 60, step: 1, value: 14, label: "slant °"}],
+  ["stagger","range",  {min: 0, max: 100, step: 5, value: 0, label: "row offset %"}],
+  ["depth",  "range",  {min: 1, max: 9, step: 1, value: 5, label: "fractal depth"}],
+  ["jitter", "range",  {min: 0, max: 95, step: 5, value: 55, label: "width jitter %"}],
+  ["minw",   "range",  {min: 1, max: 80, step: 1, value: 6, label: "min stripe px"}],
+  ["ink0",   "range",  {min: 0, max: 100, step: 1, value: 14, label: "thin ink %"}],
+  ["ink1",   "range",  {min: 0, max: 100, step: 1, value: 96, label: "thick ink %"}],
+  ["c1",     "color",  {value: "#e8112d", label: "stripe 1"}],
+  ["c2",     "color",  {value: "#ff2ec4", label: "stripe 2"}],
+  ["c3",     "color",  {value: "#e8112d", label: "stripe 3"}],
+  ["blend",  "select", {options: ["normal", "multiply", "screen", "difference"], value: "normal", label: "stripe blend"}],
+  ["fps",    "range",  {min: 5, max: 30, step: 1, value: 20, label: "gif fps"}],
+  ["gifpx",  "range",  {min: 200, max: 1000, step: 50, value: 600, label: "gif px"}]
+];
+const p = {};
+const saved = JSON.parse(localStorage.getItem("stripe-marquee") || "{}");
+const controls = document.getElementById("controls");
+
+// ---------- artboard size (exact pixels) ----------
+p.wpx = +saved.wpx || 1500;
+p.hpx = +saved.hpx || 2000;
+{
+  const wIn = Object.assign(document.createElement("input"), {type: "number", min: 100, max: 8000, value: p.wpx});
+  const hIn = Object.assign(document.createElement("input"), {type: "number", min: 100, max: 8000, value: p.hpx});
+  const preset = document.createElement("select");
+  for (const o of ["custom", "2:3", "3:4", "4:5", "1:1", "9:16"]) preset.append(new Option(o, o));
+  const swap = Object.assign(document.createElement("button"), {textContent: "⇄", title: "swap width/height"});
+  swap.style.cssText = "font:inherit;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer";
+  p.lock = saved.lock ?? false;
+  const lock = Object.assign(document.createElement("button"), {title: "lock aspect ratio"});
+  lock.style.cssText = "font:inherit;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer";
+  const drawLock = () => { lock.textContent = p.lock ? "🔒" : "🔓"; lock.style.background = p.lock ? "#eef" : "#fff"; };
+  drawLock();
+  lock.addEventListener("click", () => { p.lock = !p.lock; drawLock(); localStorage.setItem("stripe-marquee", JSON.stringify(p)); });
+
+  const sizeRow = document.createElement("label");
+  sizeRow.style.cssText = "display:flex;justify-content:space-between;align-items:center";
+  sizeRow.innerHTML = "<span>artboard px</span>";
+  const sizeBox = document.createElement("span");
+  sizeBox.style.cssText = "display:flex;align-items:center;gap:4px";
+  sizeBox.append(wIn, "×", hIn, lock);
+  sizeRow.append(sizeBox);
+
+  const presetRow = document.createElement("label");
+  presetRow.innerHTML = "<span>aspect</span>";
+  const presetBox = document.createElement("span");
+  presetBox.style.cssText = "display:flex;align-items:center;gap:6px;grid-column:2/4;justify-self:end";
+  presetBox.append(preset, swap);
+  presetRow.append(presetBox);
+
+  let ratio = p.hpx / p.wpx;                     // locked aspect, frozen at lock time
+  lock.addEventListener("click", () => { if (p.lock) ratio = p.hpx / p.wpx; });
+  const apply = soft => {
+    p.wpx = Math.max(100, Math.min(8000, +wIn.value || p.wpx));
+    p.hpx = Math.max(100, Math.min(8000, +hIn.value || p.hpx));
+    if (!soft) { wIn.value = p.wpx; hIn.value = p.hpx; ratio = p.hpx / p.wpx; }
+    render();                                    // render() persists — saves on every keystroke
+  };
+  const onEdit = (src, other, factor) => soft => {
+    if (p.lock) other.value = Math.round((+src.value || 100) * factor());
+    else preset.value = "custom";
+    apply(soft);
+  };
+  const wEdit = onEdit(wIn, hIn, () => ratio), hEdit = onEdit(hIn, wIn, () => 1 / ratio);
+  wIn.addEventListener("input", () => wEdit(true));    // live: saves while typing, no clamp-fight
+  wIn.addEventListener("change", () => wEdit(false));  // commit: normalize the field
+  hIn.addEventListener("input", () => hEdit(true));
+  hIn.addEventListener("change", () => hEdit(false));
+  preset.addEventListener("input", () => {
+    if (preset.value === "custom") return;
+    const [a, b] = preset.value.split(":").map(Number);
+    hIn.value = Math.round(p.wpx * b / a);   // width is the anchor
+    apply();
+  });
+  swap.addEventListener("click", () => {
+    [wIn.value, hIn.value] = [hIn.value, wIn.value];
+    preset.value = "custom";
+    apply();
+  });
+  controls.append(sizeRow, presetRow);
+}
+
+for (const [key, type, opt] of DEFS) {
+  p[key] = key in saved ? saved[key] : opt.value;
+  const label = document.createElement("label");
+  const name = document.createElement("span");
+  name.textContent = opt.label || key;
+  label.append(name);
+  let input;
+  if (type === "select") {
+    input = document.createElement("select");
+    for (const o of opt.options) input.append(new Option(o, o, o === p[key], o === p[key]));
+  } else {
+    input = document.createElement("input");
+    input.type = type;
+    if (type === "range") Object.assign(input, {min: opt.min, max: opt.max, step: opt.step});
+    input.value = p[key];
+  }
+  label.append(input);
+  let out;
+  if (type === "range") { out = document.createElement("output"); out.value = p[key]; label.append(out); }
+  input.addEventListener("input", () => {
+    p[key] = type === "range" ? +input.value : input.value;
+    if (out) out.value = input.value;
+    render();
+  });
+  controls.append(label);
+}
+
+// ---------- type mask ----------
+// The marquee repeats every (W, LH), so a single tile IS the whole type field:
+// scrolling only moves the sample point, so one raster serves every frame.
+// Canvas keeps it synchronous, and the exported SVG carries no <text> at all —
+// nothing to embed, nothing to substitute on another machine.
+const MW = 480;                                  // mask columns across the artboard
+let maskKey = "", maskData = null;
+function typeMask() {
+  const W = p.wpx, fs = W * p.size / 100, LH = Math.max(4, fs * p.gap / 100);
+  const key = [p.text, p.size, p.gap, p.weight, p.fit, p.reps, W].join("|");
+  if (key === maskKey) return maskData;
+  const mw = MW, mh = Math.max(1, Math.round(MW * LH / W));
+  const c = document.createElement("canvas");
+  c.width = mw; c.height = mh;
+  const g = c.getContext("2d", {willReadFrequently: true});
+  g.scale(mw / W, mw / W);                       // draw in artboard units
+  g.fillStyle = "#fff";
+  g.font = `${p.weight} ${fs}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  const line = Array.from({length: p.reps}, () => p.text || " ").join("  ");
+  const base = fs * 0.78;                        // ~cap-height baseline inside the tile
+  for (const dy of [-LH, 0, LH]) {               // 3 passes: ascenders/descenders wrap in
+    if (p.fit === "space") {
+      g.letterSpacing = "0px";
+      const w0 = g.measureText(line).width;
+      g.letterSpacing = `${(W - w0) / Math.max(1, line.length - 1)}px`;
+      g.fillText(line, 0, base + dy);
+      g.letterSpacing = "0px";
+    } else {
+      const w0 = g.measureText(line).width || 1;  // measureText ignores the CTM
+      g.save(); g.scale(W / w0, 1); g.fillText(line, 0, base + dy); g.restore();
+    }
+  }
+  const d = g.getImageData(0, 0, mw, mh).data;
+  const a = new Float32Array(mw * mh);
+  for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3] / 255;   // alpha is the mask
+  maskKey = key;
+  return maskData = {LH, a, at(x, y) {
+    const u = ((x / W) % 1 + 1) % 1, v = ((y / LH) % 1 + 1) % 1;
+    return a[Math.min(mh - 1, (v * mh) | 0) * mw + Math.min(mw - 1, (u * mw) | 0)];
+  }};
+}
+
+// ---------- generator ----------
+// time === null → frame 0; a number → that moment of the loop.
+function makeSVG(time = null) {
+  const W = p.wpx, H = p.hpx;
+  const mulberry = s => () => {
+    s |= 0; s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const rnd = mulberry(p.seed);
+  const f = n => +n.toFixed(2);
+  const m = typeMask();
+
+  // ---- scroll: the type field slides one full period, so the loop is seamless ----
+  const horiz = p.motion === "left" || p.motion === "right";
+  const dir = {up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0], none: [0, 0]}[p.motion];
+  const phase = time === null ? 0 : ((time / p.secs) % 1 + 1) % 1;
+  const period = horiz ? W : m.LH;
+  const tx = dir[0] * period * phase, ty = dir[1] * period * phase;
+
+  // ---- stripe filter: fractal columns, sampled row by row ----
+  // ONE set of cuts for the whole page, so a column is continuous top to bottom
+  // and its width pulses down the rows — that pulse is what draws the letterform.
+  // Rows are the vertical resolution of the type: too few and it cannot read.
+  const pal = [p.c1, p.c2, p.c3];
+  const cuts = [];
+  (function split(x0, x1, level) {
+    const t = 0.5 + (rnd() - 0.5) * (p.jitter / 100);    // always drawn: keeps the stream stable
+    if (level <= 0 || x1 - x0 <= p.minw * 2) { cuts.push([x0, x1, pal[(rnd() * 3) | 0]]); return; }
+    const mid = x0 + (x1 - x0) * t;
+    split(x0, mid, level - 1);
+    split(mid, x1, level - 1);
+  })(0, W, p.depth);
+
+  const rowH = H / p.rows;
+  const shear = Math.tan(p.skew * Math.PI / 180) * rowH;   // how far the top edge leans
+  const bands = [];
+  for (let r = 0; r < p.rows; r++) {
+    const y0 = f(r * rowH), y1 = f((r + 1) * rowH);
+    const off = ((r * p.stagger / 100) % 1) * W;
+    for (const [a, b, c] of cuts) {
+      // Colour is fixed per column, not per cell: a column that changes colour
+      // halfway down reads as an edge and swamps the width pulse.
+      // The type lives in the THICKNESS: every slot draws, filling a centred
+      // fraction of itself set by how much letterform sits under it.
+      const slot = b - a, cx = a + slot / 2, cy = (y0 + y1) / 2;
+      const alpha = m.at(cx + shear / 2 + off - tx, cy - ty);
+      const w = slot * (p.ink0 + (p.ink1 - p.ink0) * alpha) / 100;
+      if (w < 0.2) continue;                             // below a printable hairline
+      for (const k of off ? [off, off - W] : [0]) {       // wrap copy only when offset
+        const x0 = cx - w / 2 + k, x1 = cx + w / 2 + k;
+        bands.push(`<polygon points="${f(x0 + shear)},${y0} ${f(x1 + shear)},${y0}`
+          + ` ${f(x1)},${y1} ${f(x0)},${y1}" fill="${c}"/>`);
+      }
+    }
+  }
+  const stripes = bands.join("");
+  const blend = p.blend === "normal" ? "" : ` style="mix-blend-mode:${p.blend}"`;
+
+  return {w: W, h: H, svg:
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+    + `<rect width="${W}" height="${H}" fill="${p.paper}"/>`
+    + `<g${blend}>${stripes}</g></svg>`};
+}
+
+// ---------- render + export ----------
+const stage = document.getElementById("stage");
+const zoomEl = document.getElementById("zoom");
+p.zoom = saved.zoom === "fit" || typeof saved.zoom === "number" ? saved.zoom : "fit";
+let art;
+const view = createZoom({
+  stage, select: zoomEl, zoom: p.zoom,
+  size: () => ({w: art.w, h: art.h}),
+  onChange: z => { p.zoom = z; localStorage.setItem("stripe-marquee", JSON.stringify(p)); },
+});
+// The type is baked into each frame's geometry, so there is no transform to hand
+// SMIL — the preview redraws instead. ponytail: full re-render per frame, capped
+// at 30fps; move to per-polygon width patching if a big artboard drags.
+let raf = null, paused = false, t0 = performance.now(), last = 0;
+function draw(time) {
+  art = makeSVG(time);
+  stage.innerHTML = art.svg;
+  view.apply();
+}
+function tick(now) {
+  if (p.motion === "none" || paused) { raf = null; return; }
+  if (now - last > 33) { last = now; draw((now - t0) / 1000); }
+  raf = requestAnimationFrame(tick);
+}
+function render() {
+  localStorage.setItem("stripe-marquee", JSON.stringify(p));
+  draw(p.motion === "none" ? null : (performance.now() - t0) / 1000);
+  if (p.motion !== "none" && raf === null && !paused) raf = requestAnimationFrame(tick);
+}
+
+async function exportGIF(setLabel) {
+  const scale = Math.min(1, p.gifpx / Math.max(art.w, art.h));
+  const w = Math.round(art.w * scale), h = Math.round(art.h * scale);
+  const n = p.motion === "none" ? 1 : Math.max(1, Math.round(p.secs * p.fps));
+  const frames = [];
+  paused = true;                                       // stop the preview fighting for CPU
+  try {
+    for (let i = 0; i < n; i++) {
+      setLabel(`… ${i + 1}/${n}`);
+      await new Promise(r => setTimeout(r));           // let the label repaint
+      frames.push(await rasterise(makeSVG(i / n * p.secs).svg, w, h));
+    }
+    setLabel("… encoding");
+    await new Promise(r => setTimeout(r));
+    const blob = encodeGIF(frames, {width: w, height: h, delay: Math.max(2, Math.round(100 / p.fps))});
+    await saveAs(`stripe-${p.seed}.gif`, blob);
+  } finally {
+    paused = false;
+    render();                                          // restore the live preview
+  }
+}
+
+wireExport({
+  SVG: () => saveAs(`stripe-${p.seed}.svg`, svgBlob(art.svg)),
+  PNG: async () => saveAs(`stripe-${p.seed}.png`, await svgToPNG(art.svg, art.w, art.h)),
+  GIF: exportGIF,
+});
+render();
+
+// self-check: deterministic, type actually reaches the mask, and thickness tracks it
+console.assert(makeSVG(0).svg === makeSVG(0).svg, "generator must be deterministic");
+console.assert(typeMask().a.some(v => v > 0.5), "type mask must contain ink");
+{
+  // bands over a letterform must come out visibly fatter than bands over paper
+  const widths = [...makeSVG(0).svg.matchAll(/points="([\d.-]+),[\d.-]+ ([\d.-]+),/g)]
+    .map(mt => +mt[2] - +mt[1]);
+  const lo = Math.min(...widths), hi = Math.max(...widths);
+  console.assert(p.ink0 === p.ink1 || hi > lo * 1.2,
+    "thickness must vary with the type mask", {lo, hi});
+}
+</script>
+</body>
+</html>
