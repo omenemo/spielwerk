@@ -59,7 +59,7 @@
 // ---------- parameters ----------
 const DEFS = [
   ["text",   "text",   {value: "NEXUM", label: "text"}],
-  ["fontsize","range", {min: 8, max: 1200, step: 1, value: 300, label: "font size px"}],
+  ["fontsize","range", {min: 2, max: 4000, step: 1, value: 300, label: "font size px"}],
   ["fit",    "select", {options: ["free", "fit width"], value: "free", label: "size mode"}],
   ["lineh",  "range",  {min: 20, max: 400, step: 1, value: 110, label: "line height %"}],
   ["xscale", "range",  {min: 1, max: 400, step: 1, value: 100, label: "x scale %"}],
@@ -202,7 +202,7 @@ const FAM = `"Helvetica Neue", Helvetica, Arial, sans-serif`;
 let maskKey = "", maskData = null;
 function typeMask() {
   const key = [p.text, p.fontsize, p.fit, p.lineh, p.xscale, p.yscale, p.weight,
-               p.basex, p.basey, p.track, p.gapx, p.wpx].join("|");
+               p.basex, p.basey, p.track, p.gapx, p.wpx, p.hpx].join("|");
   if (key === maskKey) return maskData;
   const sx = Math.max(1, p.xscale) / 100, sy = Math.max(1, p.yscale) / 100;
   const line = p.text || " ";
@@ -230,15 +230,22 @@ function typeMask() {
   g.transform(k, 0, 0, 1, 0, 0);
   g.font = `${p.weight} ${fs * sy}px ${FAM}`;
   g.letterSpacing = `${p.track / 100 * fs * sy}px`;
-  const bx = p.basex / 100 * adv, by = fs * sy * 0.78 + p.basey / 100 * LH;
+  // Baseline from real font metrics, not a 0.78 guess — the tile top is the
+  // ascent line, so glyphs sit in the tile the way the typeface intends.
+  const asc = g.measureText(line).fontBoundingBoxAscent || fs * sy * 0.8;
   for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++)
-    g.fillText(line, (bx + i * adv) / k, by + j * LH);   // 3×3: overhang wraps back in
+    g.fillText(line, (i * adv) / k, asc + j * LH);       // 3×3: overhang wraps back in
   const d = g.getImageData(0, 0, mw, mh).data;   // getImageData ignores the CTM
   const a = new Float32Array(mw * mh);
   for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3] / 255;   // alpha is the mask
+  // Font size scales the glyphs ABOUT THE BASELINE. The baseline is pinned to a
+  // fixed spot on the board (baseline x/y %), and the pin shifts the sample point
+  // to put it there — so growing the type swells it around that line instead of
+  // shoving the whole field down the page, which is what the old 0.78*fs did.
+  const pinX = -p.basex / 100 * p.wpx, pinY = asc - p.basey / 100 * p.hpx;
   maskKey = key;
-  return maskData = {LH, adv, fs, a, canvas: c, at(x, y) {
-    const u = ((x / adv) % 1 + 1) % 1, v = ((y / LH) % 1 + 1) % 1;
+  return maskData = {LH, adv, fs, asc, pinX, pinY, a, canvas: c, at(x, y) {
+    const u = (((x + pinX) / adv) % 1 + 1) % 1, v = (((y + pinY) / LH) % 1 + 1) % 1;
     return a[Math.min(mh - 1, (v * mh) | 0) * mw + Math.min(mw - 1, (u * mw) | 0)];
   }};
 }
@@ -366,8 +373,10 @@ function drawPeek(time) {
   const s = pw / W, tileW = m.adv * s, tileH = m.LH * s;
   if (tileW < 1 || tileH < 1) return;                // type finer than a preview pixel
   const wrap = (v, n) => ((v % n) + n) % n - n;      // start one tile off-screen
-  for (let y = wrap(ty * s, tileH); y < ph; y += tileH)
-    for (let x = wrap(tx * s, tileW); x < pw; x += tileW)
+  // subtract the same pin the sampler applies, or the preview would show the type
+  // in a different place from where the filter reads it
+  for (let y = wrap((ty - m.pinY) * s, tileH); y < ph; y += tileH)
+    for (let x = wrap((tx - m.pinX) * s, tileW); x < pw; x += tileW)
       g.drawImage(m.canvas, x, y, tileW, tileH);
 }
 
