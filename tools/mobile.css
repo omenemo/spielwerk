@@ -20,7 +20,8 @@
               margin: 0 -12px 2px; padding: 13px 12px 9px; cursor: pointer;
               display: flex; justify-content: space-between; align-items: center;
               user-select: none; }
-  #panel h1::after { content: "▾"; color: #888; font-size: 12px; }
+  #panel h1::after { content: "▾"; color: #1c1c1c; font-size: 22px; line-height: 1;
+                     margin: -6px -2px 0 0; }
   #panel.open h1::after { content: "▴"; }
 
   /* compact rows — the sheet has to fit ~20 controls */
