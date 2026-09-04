@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Logo Extruder — 2D logo to spinning 3D</title>
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  body { font: 13px/1.4 system-ui, sans-serif; margin: 0; display: flex; background: #e9e7e2; }
+  #panel { width: 264px; margin: 16px; padding: 14px 18px; background: #fff; border-radius: 8px;
+           box-shadow: 0 2px 12px rgba(0,0,0,.15); box-sizing: border-box; flex-shrink: 0;
+           align-self: flex-start; max-height: calc(100vh - 32px); overflow-y: auto; }
+  #panel label { display: grid; grid-template-columns: 90px 1fr 38px; align-items: center; margin: 10px 0; gap: 6px; }
+  #panel label span:first-child { color: #444; }
+  #panel input[type=range] { width: 100%; min-width: 0; margin: 0; }
+  #panel input[type=color], #panel select, #panel input[type=checkbox] { justify-self: end; grid-column: 2 / 4; }
+  #panel input[type=file] { grid-column: 1 / 3; width: 100%; min-width: 0; font: inherit; font-size: 11px; }
+  #panel .clear { grid-column: 3 / 4; justify-self: end; font: inherit; line-height: 1;
+                  padding: 3px 7px; border: 1px solid #ccc; border-radius: 6px;
+                  background: #fff; color: #444; cursor: pointer; }
+  #panel .clear:hover:not(:disabled) { background: #fdecec; border-color: #e58; color: #c00; }
+  #panel .clear:disabled { opacity: .3; cursor: default; }
+  #panel output { text-align: right; font-variant-numeric: tabular-nums; }
+  #panel input[type=number] { width: 58px; box-sizing: border-box; font: inherit; }
+  #panel hr { border: none; border-top: 1px solid #e5e2dc; margin: 14px 0 6px; }
+  #panel .reset { cursor: pointer; }
+  #panel .reset:hover { color: #3b82f6; text-decoration: underline dotted; }
+  #panel label.changed span:first-child { color: #1c1c1c; font-weight: 600; }
+  #panel label.changed span:first-child::after { content: " •"; color: #3b82f6; }
+  #panel .hint { color: #999; font-size: 11px; margin: 2px 0 0; }
+  #stage { flex: 1; display: flex; padding: 32px; overflow: auto; }
+  #stage canvas { display: block; margin: auto; flex-shrink: 0;
+                  box-shadow: 0 4px 24px rgba(0,0,0,.18); }
+  #viewbox { position: fixed; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px;
+             background: #fff; border-radius: 8px; padding: 8px 12px; box-shadow: 0 2px 12px rgba(0,0,0,.15); }
+  #viewbox span { color: #444; }
+  #viewbox select { font: inherit; padding: 3px 6px; }
+  .btns { display: flex; gap: 8px; margin-top: 16px; }
+  .btns a { flex: 1; text-align: center; padding: 7px 0; border-radius: 8px; background: #3b82f6;
+            color: #fff; text-decoration: none; cursor: pointer; }
+  .btns select { font: inherit; padding: 4px 6px; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
+  h1 { font-size: 14px; margin: 0 0 6px; }
+</style>
+<body>
+<div id="panel">
+  <h1>Logo Extruder</h1>
+  <label><span>logo file</span><input id="logo" type="file" accept=".svg,image/*"></label>
+  <p class="hint" id="logohint">SVG extrudes as true geometry, counters punched through. PNG/JPG is sliced into layers — transparent PNG works best. Click any label to reset it.</p>
+  <label><span>background</span><input id="bgimg" type="file" accept="image/*"></label>
+  <div id="controls"></div>
+  <div class="btns">
+    <select id="fmt" title="file type"></select>
+    <a id="dl">⬇ export</a>
+    <a id="dldir" title="choose export folder">📁 …</a>
+  </div>
+</div>
+<div id="stage"></div>
+<div id="viewbox">
+  <span>view</span>
+  <select id="zoom">
+    <option value="fit">scale to fit</option>
+    <option>25%</option><option>50%</option><option>100%</option><option>200%</option><option>400%</option>
+  </select>
+</div>
+<script src="export.js"></script>
+<script src="zoom.js"></script>
+<script type="module">
+import * as THREE from "https://esm.sh/three@0.160.0";
+import { SVGLoader } from "https://esm.sh/three@0.160.0/examples/jsm/loaders/SVGLoader.js";
+
+// ---------- parameters ----------
+const DEFS = [
+  ["depth",    "range",  {min: 0, max: 60, step: 1, value: 12, label: "depth %"}],
+  ["bevel",    "range",  {min: 0, max: 10, step: 0.5, value: 1, label: "bevel %"}],
+  ["holes",    "select", {options: ["auto", "evenodd", "nonzero"], value: "auto", label: "counters"}],
+  ["slices",   "range",  {min: 8, max: 160, step: 4, value: 64, label: "img slices"}],
+  ["keyWhite", "range",  {min: 0, max: 100, step: 5, value: 0, label: "key white %"}],
+  ["color",    "color",  {value: "#c9a227", label: "logo"}],
+  ["metal",    "range",  {min: 0, max: 100, step: 5, value: 80, label: "metal %"}],
+  ["rough",    "range",  {min: 0, max: 100, step: 5, value: 25, label: "rough %"}],
+  ["tint",     "checkbox", {value: false, label: "tint image"}],
+  ["bg",       "color",  {value: "#1c1c1c", label: "backdrop"}],
+  ["light",    "range",  {min: 0, max: 360, step: 5, value: 40, label: "light angle"}],
+  ["power",    "range",  {min: 0, max: 300, step: 10, value: 160, label: "light %"}],
+  ["motion",   "select", {options: ["spin", "rock", "orbit"], value: "spin"}],
+  ["spinX",    "range",  {min: -180, max: 180, step: 5, value: 0, label: "x °/s"}],
+  ["spinY",    "range",  {min: -180, max: 180, step: 5, value: 45, label: "y °/s"}],
+  ["spinZ",    "range",  {min: -180, max: 180, step: 5, value: 0, label: "z °/s"}],
+  ["bob",      "range",  {min: 0, max: 60, step: 5, value: 0, label: "bob %"}],
+  ["persp",    "range",  {min: 10, max: 70, step: 1, value: 35, label: "lens °"}],
+  ["cycle",    "range",  {min: 1, max: 20, step: 0.5, value: 8, label: "cycle sec"}],
+  ["fps",      "range",  {min: 5, max: 30, step: 5, value: 20, label: "gif fps"}]
+];
+const p = {};
+const saved = JSON.parse(localStorage.getItem("logo-extruder") || "{}");
+const controls = document.getElementById("controls");
+
+// ---------- canvas size ----------
+p.wpx = +saved.wpx || 1200;
+p.hpx = +saved.hpx || 1200;
+{
+  const wIn = Object.assign(document.createElement("input"), {type: "number", min: 100, max: 4000, value: p.wpx});
+  const hIn = Object.assign(document.createElement("input"), {type: "number", min: 100, max: 4000, value: p.hpx});
+  const row = document.createElement("label");
+  row.style.cssText = "display:flex;justify-content:space-between;align-items:center";
+  row.innerHTML = "<span>canvas px</span>";
+  const box = document.createElement("span");
+  box.style.cssText = "display:flex;align-items:center;gap:4px";
+  box.append(wIn, "×", hIn);
+  row.append(box);
+  const apply = () => {
+    p.wpx = Math.max(100, Math.min(4000, +wIn.value || p.wpx));
+    p.hpx = Math.max(100, Math.min(4000, +hIn.value || p.hpx));
+    resize(); save();
+  };
+  wIn.addEventListener("input", apply);
+  hIn.addEventListener("input", apply);
+  controls.append(row);
+}
+
+for (const [key, type, opt] of DEFS) {
+  p[key] = key in saved ? saved[key] : opt.value;
+  if (type === "select" && !opt.options.includes(p[key])) p[key] = opt.value;
+  const label = document.createElement("label");
+  const name = document.createElement("span");
+  name.textContent = opt.label || key;
+  label.append(name);
+  let input;
+  if (type === "select") {
+    input = document.createElement("select");
+    for (const o of opt.options) input.append(new Option(o, o, o === p[key], o === p[key]));
+  } else {
+    input = document.createElement("input");
+    input.type = type;
+    if (type === "range") Object.assign(input, {min: opt.min, max: opt.max, step: opt.step});
+    if (type === "checkbox") input.checked = p[key]; else input.value = p[key];
+  }
+  label.append(input);
+  let out;
+  if (type === "range") { out = document.createElement("output"); out.value = p[key]; label.append(out); }
+
+  const apply = () => {
+    save();
+    if (["depth", "bevel", "holes", "slices", "keyWhite", "tint"].includes(key)) build(); else style();
+  };
+  // one writer for both the slider and the reset — keeps p, the input and the readout in step
+  const set = v => {
+    p[key] = v;
+    if (type === "checkbox") input.checked = v; else input.value = v;
+    if (out) out.value = v;
+    label.classList.toggle("changed", v !== opt.value);
+  };
+  set(p[key]);
+  input.addEventListener("input", () => {
+    set(type === "range" ? +input.value : type === "checkbox" ? input.checked : input.value);
+    apply();
+  });
+  // click the name or the value to put this one control back to its default
+  const reset = () => { if (p[key] !== opt.value) { set(opt.value); apply(); } };
+  for (const hit of [name, out]) {
+    if (!hit) continue;
+    hit.classList.add("reset");
+    hit.title = `reset to ${opt.value}`;
+    hit.addEventListener("click", reset);
+  }
+  controls.append(label);
+}
+const save = () => localStorage.setItem("logo-extruder", JSON.stringify(p));
+
+// ---------- scene ----------
+const stage = document.getElementById("stage");
+const renderer = new THREE.WebGLRenderer({antialias: true, preserveDrawingBuffer: true});
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.append(renderer.domElement);
+p.zoom = saved.zoom === "fit" || typeof saved.zoom === "number" ? saved.zoom : "fit";
+const view = createZoom({
+  stage, select: document.getElementById("zoom"), zoom: p.zoom,
+  size: () => ({w: p.wpx, h: p.hpx}),
+  onChange: z => { p.zoom = z; save(); },
+});
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(p.persp, 1, 0.01, 100);
+const pivot = new THREE.Group();            // rotates
+const inner = new THREE.Group();            // holds centered geometry
+pivot.add(inner);
+scene.add(pivot);
+const key = new THREE.DirectionalLight(0xffffff, 2);
+const fill = new THREE.DirectionalLight(0xffffff, 0.6);
+fill.position.set(-1, -0.5, -1);
+scene.add(key, fill, new THREE.AmbientLight(0xffffff, 0.5));
+
+let source = null;      // {kind:"svg", text} | {kind:"img", image}
+let bgTexture = null;
+let material = new THREE.MeshStandardMaterial({side: THREE.DoubleSide});
+
+function resize() {
+  renderer.setPixelRatio(1);                 // buffer == export pixels
+  renderer.setSize(p.wpx, p.hpx, false);     // false = leave the CSS size to the zoom module
+  camera.aspect = p.wpx / p.hpx;
+  camera.updateProjectionMatrix();
+  fitBackground();
+  view.apply();
+}
+
+// Background = cover, not stretch. The background pass copies the texture's matrix straight
+// into its uvTransform, so cropping is just repeat/offset: shrink the sampled window on the
+// overflowing axis and centre it. Wrapping stays ClampToEdge — the window never leaves 0..1.
+function fitBackground() {
+  const img = bgTexture?.image;
+  if (!img) return;
+  const f = (img.width / img.height) / (p.wpx / p.hpx);   // >1 image is wider than the artboard
+  bgTexture.repeat.set(f > 1 ? 1 / f : 1, f > 1 ? 1 : f);
+  bgTexture.offset.set(f > 1 ? (1 - 1 / f) / 2 : 0, f > 1 ? 0 : (1 - f) / 2);
+}
+
+function style() {
+  material.color.set(source?.kind === "img" && !p.tint ? "#ffffff" : p.color);
+  material.metalness = p.metal / 100;
+  material.roughness = p.rough / 100;
+  fitBackground();
+  scene.background = bgTexture || new THREE.Color(p.bg);
+  const a = p.light * Math.PI / 180;
+  key.position.set(Math.cos(a), Math.sin(a), 1);
+  key.intensity = p.power / 100 * 2;
+  camera.fov = p.persp;
+  camera.updateProjectionMatrix();
+  save();
+}
+
+// image → texture, optionally keying near-white pixels to transparent
+function imageTexture(image) {
+  const c = document.createElement("canvas");
+  c.width = image.naturalWidth; c.height = image.naturalHeight;
+  const ctx = c.getContext("2d", {willReadFrequently: true});
+  ctx.drawImage(image, 0, 0);
+  if (p.keyWhite > 0) {
+    const cut = 255 - (p.keyWhite / 100) * 255;      // 100% keys everything above black
+    const d = ctx.getImageData(0, 0, c.width, c.height);
+    for (let i = 0; i < d.data.length; i += 4) {
+      const lum = 0.299 * d.data[i] + 0.587 * d.data[i + 1] + 0.114 * d.data[i + 2];
+      if (lum >= cut) d.data[i + 3] = 0;
+    }
+    ctx.putImageData(d, 0, 0);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// ---------- svg → shapes (counterspace) ----------
+// SVGLoader decides holes with a scanline that only compares subpaths inside ONE <path>, and
+// its nonzero branch needs the counter to wind against its glyph. Real logos break both ways:
+// counters exported in the same winding, or split into their own element.
+//
+// "auto" ignores winding and element structure and asks the only question that matters:
+// is this ring geometrically INSIDE another? Nesting depth then gives parity — depth 1 = counter,
+// depth 2 = island inside the counter. Overlapping glyphs contain each other nowhere, so they
+// stay solid and simply union, instead of punching a hole through the overlap.
+
+// ray cast, counting crossings of the ring's edges to the left of the point
+function inRing(pt, ring) {
+  let hit = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i], b = ring[j];
+    if ((a.y > pt.y) !== (b.y > pt.y) &&
+        pt.x < (b.x - a.x) * (pt.y - a.y) / (b.y - a.y) + a.x) hit = !hit;
+  }
+  return hit;
+}
+
+// A ring is inside another when most of its vertices are — a majority vote rides out the
+// vertices that land exactly on a shared edge in tightly kerned or touching outlines.
+function ringInside(inner, outer) {
+  let n = 0, votes = 0;
+  for (let i = 0; i < inner.length; i += Math.max(1, Math.ceil(inner.length / 9))) {
+    votes++;
+    if (inRing(inner[i], outer)) n++;
+  }
+  return n * 2 > votes;
+}
+
+function svgShapes(text, rule = p.holes) {
+  const paths = new SVGLoader().parse(text).paths;
+  const subs = paths.flatMap(path => path.subPaths);
+  if (rule !== "auto") {                       // legacy SVGLoader behaviour, kept as an escape hatch
+    const merged = new THREE.ShapePath();
+    merged.subPaths = subs;
+    merged.userData = {style: {fillRule: rule}};
+    return SVGLoader.createShapes(merged);
+  }
+
+  // Keep each ring tagged with the <path> element it came from — that tag is what separates a
+  // backdrop from a glyph below.
+  const items = paths.flatMap((path, pi) => path.subPaths.map(sp => ({pts: sp.getPoints(12), pi})))
+                     .filter(it => it.pts.length > 2);
+
+  // Duplicate artwork. Logos are routinely saved with the outline stacked twice — a light copy
+  // over a dark one, or a compound path kept beside its released parts. Two coincident rings
+  // each report "inside" the other, which corrupts every nesting depth downstream: the glyph
+  // body lands at depth 1 and becomes a hole, its counters reach depth 2 and come back solid.
+  // Same footprint, same area = same ring, so keep one. Compared with a tolerance because the
+  // copies are usually redrawn rather than cloned (areas here differ by ~1 unit in 20000).
+  const bbox = pts => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const q of pts) {
+      minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x);
+      minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y);
+    }
+    return {minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY};
+  };
+  for (const it of items) { it.box = bbox(it.pts); it.area = Math.abs(THREE.ShapeUtils.area(it.pts)); }
+  let merged = 0;
+  for (let i = items.length - 1; i > 0; i--) {
+    const a = items[i];
+    const tol = 0.01 * Math.max(a.box.w, a.box.h);
+    const twin = items.findIndex((b, j) => j < i
+      && Math.abs(a.box.minX - b.box.minX) <= tol && Math.abs(a.box.maxX - b.box.maxX) <= tol
+      && Math.abs(a.box.minY - b.box.minY) <= tol && Math.abs(a.box.maxY - b.box.maxY) <= tol
+      && Math.abs(a.area - b.area) <= 0.02 * Math.max(a.area, b.area));
+    if (twin >= 0) { items.splice(i, 1); merged++; }
+  }
+
+  // Backdrop plates. SVGLoader has no clipPath case, so a <clipPath><rect/></clipPath> not
+  // tucked inside <defs> is parsed as a real full-artboard rectangle — as are literal background
+  // rects. Such a ring encloses every glyph, and parity then inverts the whole logo: glyphs
+  // become holes punched in the plate, their counters come back as solid blobs.
+  //
+  // Geometry alone can't tell that plate from a rectangular 'B' holding two counters. The source
+  // element can: counters are subpaths of the SAME <path> as their glyph, a plate is its own
+  // element. So a ring is a backdrop when it contains every other ring, all of them belong to
+  // other elements, and there are at least two — an 'O' whose counter was exported separately
+  // contains just one, and must stay a glyph.
+  let dropped = 0;
+  for (let again = true; again && items.length > 2; ) {
+    const i = items.findIndex((r, ri) =>
+      items.every((o, j) => j === ri || (o.pi !== r.pi && ringInside(o.pts, r.pts))));
+    again = i >= 0;
+    if (again) { items.splice(i, 1); dropped++; }
+  }
+  const rings = items.map(it => it.pts);
+
+  // ponytail: O(n²) containment over rings, fine for a logo's few hundred; bbox prefilter if a
+  // map-sized SVG ever lands here.
+  const inside = rings.map((ring, i) => rings.flatMap((o, j) => j !== i && ringInside(ring, o) ? [j] : []));
+  const depth = inside.map(c => c.length);
+  const area = rings.map(r => Math.abs(THREE.ShapeUtils.area(r)));
+
+  // ExtrudeGeometry wants the contour CCW and its holes CW, or the walls come out inside out
+  const wind = (ring, cw) => THREE.ShapeUtils.isClockWise(ring) === cw ? ring : ring.slice().reverse();
+  const shapes = new Map();
+  rings.forEach((ring, i) => {
+    if (depth[i] % 2 === 0) shapes.set(i, new THREE.Shape(wind(ring, false)));
+  });
+  let counters = 0;
+  rings.forEach((ring, i) => {
+    if (depth[i] % 2 === 0) return;
+    // owner = smallest container that is itself a solid; a hole can't own a hole
+    let best = -1;
+    for (const j of inside[i]) if (depth[j] % 2 === 0 && (best < 0 || area[j] < area[best])) best = j;
+    if (shapes.has(best)) { shapes.get(best).holes.push(new THREE.Path(wind(ring, true))); counters++; }
+  });
+  svgShapes.stats = {shapes: shapes.size, counters, dropped, merged};
+  return [...shapes.values()];
+}
+
+function clear(obj) {
+  for (const child of [...obj.children]) {
+    child.geometry?.dispose();
+    obj.remove(child);
+  }
+}
+
+function build() {
+  clear(inner);
+  material.map?.dispose();
+  material.map = null;
+  material.alphaTest = 0;
+  if (!source) { placeholder(); style(); return; }
+
+  if (source.kind === "svg") {
+    const shapes = svgShapes(source.text);
+    const st = svgShapes.stats || {shapes: 0, counters: 0, dropped: 0, merged: 0};
+    document.getElementById("logohint").textContent =
+      `${st.shapes} shape${st.shapes === 1 ? "" : "s"}, ${st.counters} counter${st.counters === 1 ? "" : "s"} punched`
+      + (st.merged ? `, ${st.merged} duplicate${st.merged === 1 ? "" : "s"} merged` : "")
+      + (st.dropped ? `, ${st.dropped} backdrop ignored` : "")
+      + ". Switch counters to evenodd/nonzero if that looks wrong.";
+    if (!shapes.length) { placeholder(); style(); return; }
+    const flat = new THREE.ShapeGeometry(shapes);
+    flat.computeBoundingBox();
+    const size = flat.boundingBox.getSize(new THREE.Vector3());
+    flat.dispose();
+    const unit = Math.max(size.x, size.y) || 1;
+    const bev = unit * p.bevel / 100;
+    const geo = new THREE.ExtrudeGeometry(shapes, {
+      depth: unit * p.depth / 100, curveSegments: 12,
+      bevelEnabled: bev > 0, bevelThickness: bev, bevelSize: bev, bevelSegments: 3
+    });
+    geo.scale(1, -1, 1);          // SVG y grows down
+    geo.center();
+    geo.computeVertexNormals();
+    const s = 2 / unit;
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.scale.setScalar(s);
+    inner.add(mesh);
+  } else {
+    // raster: stack of textured slices — reads as a solid extrusion when spinning
+    material.map = imageTexture(source.image);
+    material.alphaTest = 0.5;
+    const ar = source.image.naturalWidth / source.image.naturalHeight;
+    const w = ar >= 1 ? 2 : 2 * ar, h = ar >= 1 ? 2 / ar : 2;
+    const d = 2 * p.depth / 100;
+    const n = d > 0 ? Math.max(2, Math.round(p.slices)) : 1;   // flat = one plane, not a z-fighting stack
+    const plane = new THREE.PlaneGeometry(w, h);
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Mesh(plane, material);
+      m.position.z = n > 1 ? -d / 2 + (i / (n - 1)) * d : 0;
+      inner.add(m);
+    }
+  }
+  frame();
+  style();
+}
+
+function placeholder() {
+  const geo = new THREE.TorusKnotGeometry(0.6, 0.2, 128, 24);
+  inner.add(new THREE.Mesh(geo, material));
+  frame();
+}
+
+// pull the camera back far enough to hold the object at any rotation
+function frame() {
+  const box = new THREE.Box3().setFromObject(inner);
+  const r = box.getBoundingSphere(new THREE.Sphere()).radius || 1;
+  camera.position.set(0, 0, r / Math.sin(p.persp * Math.PI / 360) * 1.1);
+  camera.lookAt(0, 0, 0);
+}
+
+// ---------- animation ----------
+const rad = d => d * Math.PI / 180;
+function pose(t) {
+  if (p.motion === "rock") {
+    const w = Math.sin(2 * Math.PI * t / p.cycle);
+    pivot.rotation.set(rad(p.spinX) * w, rad(p.spinY) * w, rad(p.spinZ) * w);
+    pivot.position.set(0, 0, 0);
+  } else if (p.motion === "orbit") {
+    // object holds still, the camera swings around it
+    const a = 2 * Math.PI * t / p.cycle;
+    const d = camera.position.length();
+    const tilt = rad(p.spinX) * 0.25;
+    camera.position.set(Math.sin(a) * d * Math.cos(tilt), Math.sin(tilt) * d, Math.cos(a) * d * Math.cos(tilt));
+    camera.lookAt(0, 0, 0);
+    pivot.rotation.set(0, 0, 0);
+  } else {
+    pivot.rotation.set(rad(p.spinX) * t, rad(p.spinY) * t, rad(p.spinZ) * t);
+  }
+  pivot.position.y = p.bob ? Math.sin(2 * Math.PI * t / p.cycle) * (p.bob / 100) * 0.5 : 0;
+}
+
+const clock = new THREE.Clock();
+let capturing = false;
+renderer.setAnimationLoop(() => {
+  if (capturing) return;
+  pose(clock.getElapsedTime());
+  renderer.render(scene, camera);
+});
+
+// ---------- uploads ----------
+document.getElementById("logo").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  if (/svg/.test(file.type) || /\.svg$/i.test(file.name)) {
+    reader.onload = () => { source = {kind: "svg", text: reader.result}; build(); };
+    reader.readAsText(file);
+  } else {
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => { source = {kind: "img", image}; build(); };
+      image.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
+});
+document.getElementById("bgimg").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => new THREE.TextureLoader().load(reader.result, tex => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    bgTexture?.dispose();
+    bgTexture = tex;
+    style();
+  });
+  reader.readAsDataURL(file);
+});
+
+// ✕ next to each file picker. Disabled until something is loaded, so it never looks like a
+// live control with nothing behind it. Clearing the input's value matters as much as dropping
+// the state — without it, re-picking the same file fires no change event.
+const HINT = document.getElementById("logohint").textContent;
+function clearButton(id, onClear) {
+  const input = document.getElementById(id);
+  const btn = Object.assign(document.createElement("button"), {
+    type: "button", className: "clear", textContent: "✕",
+    title: "remove this file", disabled: true
+  });
+  btn.setAttribute("aria-label", "remove this file");
+  input.after(btn);
+  input.addEventListener("change", () => { btn.disabled = !input.files.length; });
+  btn.addEventListener("click", () => {
+    input.value = "";
+    btn.disabled = true;
+    onClear();
+  });
+  return btn;
+}
+clearButton("logo", () => {
+  source = null;
+  document.getElementById("logohint").textContent = HINT;
+  build();                                   // falls back to the placeholder knot
+});
+clearButton("bgimg", () => {
+  bgTexture?.dispose();
+  bgTexture = null;
+  style();                                   // back to the flat backdrop colour
+});
+
+// ---------- export ----------
+async function exportGIF(setLabel) {
+  capturing = true;
+  const n = Math.round(p.cycle * p.fps);
+  const gw = Math.min(480, p.wpx), gh = Math.round(gw * p.hpx / p.wpx);
+  const c = document.createElement("canvas");
+  c.width = gw; c.height = gh;
+  const ctx = c.getContext("2d", {willReadFrequently: true});
+  const frames = [];
+  const home = camera.position.clone();
+  try {
+    for (let i = 0; i < n; i++) {
+      pose(i / n * p.cycle);                     // one exact loop
+      renderer.render(scene, camera);
+      ctx.drawImage(renderer.domElement, 0, 0, gw, gh);
+      frames.push(ctx.getImageData(0, 0, gw, gh).data);
+      if (i % 8 === 0) {
+        setLabel(`… ${i + 1}/${n}`);
+        await new Promise(r => setTimeout(r));                // keep the tab responsive
+      }
+    }
+  } finally {                                    // never leave the loop frozen mid-capture
+    camera.position.copy(home);
+    camera.lookAt(0, 0, 0);
+    capturing = false;
+  }
+  setLabel("… encoding");
+  await new Promise(r => setTimeout(r));
+  const blob = encodeGIF(frames, {width: gw, height: gh, delay: Math.round(100 / p.fps)});
+  await saveAs("logo-extruder.gif", blob);
+}
+
+wireExport({
+  PNG: () => new Promise(r => renderer.domElement.toBlob(
+    async b => r(await saveAs("logo-extruder.png", b)), "image/png")),
+  GIF: exportGIF,
+});
+
+resize();
+build();
+
+// self-check: counters punch through, and two overlapping glyphs stay solid instead of
+// punching a hole through the overlap — the two failures that made the O read as a slab.
+{
+  const o = (cx, r) => `<circle cx="${cx}" cy="50" r="${r}"/>`;
+  const doc = b => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100">${b}</svg>`;
+  const one = svgShapes(doc(o(50, 40) + o(50, 20)), "auto");
+  console.assert(one.length === 1 && one[0].holes.length === 1,
+    "counterspace: want 1 shape + 1 hole, got", one.length, "shape(s),", one[0]?.holes.length, "hole(s)");
+  const two = svgShapes(doc(o(50, 40) + o(50, 20) + o(110, 40) + o(110, 20)), "auto");
+  console.assert(two.length === 2 && two.every(s => s.holes.length === 1),
+    "overlap: want 2 shapes with 1 hole each, got", two.length, "shape(s), holes",
+    two.map(s => s.holes.length).join());
+  // a clip frame must not invert the logo into holes-in-a-plate
+  const clipped = svgShapes(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 100">`
+    + `<clipPath id="c"><rect width="300" height="100"/></clipPath>`
+    + `<g clip-path="url(#c)">${o(50, 40)}${o(50, 20)}${o(110, 40)}${o(110, 20)}</g></svg>`, "auto");
+  console.assert(clipped.length === 2 && clipped.every(s => s.holes.length === 1),
+    "backdrop: clip frame must be ignored, got", clipped.length, "shape(s), holes",
+    clipped.map(s => s.holes.length).join());
+  // artwork stacked twice (light copy over dark) must collapse, not invert
+  const art = o(50, 40) + o(50, 20) + o(110, 40) + o(110, 20);
+  const dbl = svgShapes(doc(`<g fill="#000">${art}</g><g fill="#fff">${art}</g>`), "auto");
+  console.assert(dbl.length === 2 && dbl.every(s => s.holes.length === 1),
+    "duplicates: stacked copies must merge, got", dbl.length, "shape(s), holes",
+    dbl.map(s => s.holes.length).join());
+}
+
+// self-check: "rock" must be seamless — pose at t=0 and t=cycle are identical
+{
+  const mode = p.motion;
+  p.motion = "rock";
+  pose(0);
+  const a = pivot.rotation.toArray().slice(0, 3);
+  pose(p.cycle);
+  const b = pivot.rotation.toArray().slice(0, 3);
+  console.assert(a.every((v, i) => Math.abs(v - b[i]) < 1e-6), "rock loop must be seamless");
+  p.motion = mode;
+}
+</script>
+</body>
+</html>

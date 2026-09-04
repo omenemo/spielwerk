@@ -57,7 +57,9 @@
     { file: "tools/arrow-field.html", name: "Arrow Field",
       desc: "A grid of arrows steered by a flow field — noise, swirl, radial or plain grid. Move the pointer to pull them toward it (or push them away). Looping rotation, exports as SVG, PNG or animated GIF." },
     { file: "tools/imprint.html", name: "Imprint",
-      desc: "Tone-on-tone embossed ray bursts — thin strokes pressed into paper, relief light and shadow, soft halos. Optional grow-in motion, SVG/PNG export." }
+      desc: "Tone-on-tone embossed ray bursts — thin strokes pressed into paper, relief light and shadow, soft halos. Optional grow-in motion, SVG/PNG export." },
+    { file: "tools/logo-extruder.html", name: "Logo Extruder",
+      desc: "Upload a 2D logo (SVG or image) and extrude it into 3D. SVG becomes true beveled geometry, raster art is stacked into slices. Spin, rock or orbit on any axis, metal shading, uploadable background image, PNG and looping GIF export." }
   ];
 
   for (const t of tools) $("pick").append(new Option(t.name, t.file));
