@@ -22,13 +22,18 @@
   #viewbox select { font: inherit; padding: 3px 6px; }
   .btns { display: flex; gap: 8px; margin-top: 16px; }
   .btns a { flex: 1; text-align: center; padding: 7px 0; border-radius: 8px; background: #3b82f6; color: #fff; text-decoration: none; cursor: pointer; }
+  .btns select { font: inherit; padding: 4px 6px; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
   h1 { font-size: 14px; margin: 0 0 6px; }
 </style>
 <body>
 <div id="panel">
   <h1>Imprint</h1>
   <div id="controls"></div>
-  <div class="btns"><a id="dlsvg">⬇ SVG</a><a id="dlpng">⬇ PNG</a><a id="dldir" title="choose export folder">📁 …</a></div>
+  <div class="btns">
+    <select id="fmt" title="file type"></select>
+    <a id="dl">⬇ export</a>
+    <a id="dldir" title="choose export folder">📁 …</a>
+  </div>
 </div>
 <div id="stage"></div>
 <div id="viewbox">
@@ -40,6 +45,7 @@
   </select>
 </div>
 <script src="export.js"></script>
+<script src="zoom.js"></script>
 <script>
 // ---------- parameters ----------
 const DEFS = [
@@ -257,100 +263,22 @@ function makeSVG() {
 // ---------- render + export ----------
 const stage = document.getElementById("stage");
 const zoomEl = document.getElementById("zoom");
-p.zoom = saved.zoom === "fit" || typeof saved.zoom === "number" ? saved.zoom : "fit";  // "fit" | percent
+p.zoom = saved.zoom === "fit" || typeof saved.zoom === "number" ? saved.zoom : "fit";
 let art;
-const zPct = () => p.zoom === "fit"
-  ? Math.min((stage.clientWidth - 64) / art.w, (stage.clientHeight - 64) / art.h, 1) * 100
-  : p.zoom;
-function syncSelect() {
-  if (p.zoom === "fit") { zoomEl.value = "fit"; return; }
-  const label = Math.round(p.zoom) + "%";
-  let opt = [...zoomEl.options].find(o => o.value === label);
-  if (!opt) {
-    opt = zoomEl.querySelector(".custom") || zoomEl.appendChild(Object.assign(new Option(), {className: "custom"}));
-    opt.textContent = opt.value = label;
-  }
-  zoomEl.value = label;
-}
-function applyZoom() {
-  const svg = stage.querySelector("svg");
-  if (!svg) return;
-  const z = zPct() / 100;
-  svg.style.width = art.w * z + "px";
-  svg.style.height = art.h * z + "px";   // both set — box always matches viewBox, no letterbox
-  syncSelect();
-}
-function setZoom(v, ax, ay) {            // v: "fit" | percent; ax/ay: stage-relative anchor
-  const oldZ = zPct() / 100;
-  p.zoom = v === "fit" ? "fit" : Math.max(2, Math.min(800, v));
-  localStorage.setItem("imprint", JSON.stringify(p));
-  const r = stage.getBoundingClientRect();
-  ax ??= r.width / 2; ay ??= r.height / 2;
-  const cx = stage.scrollLeft + ax, cy = stage.scrollTop + ay;
-  applyZoom();
-  const k = (zPct() / 100) / oldZ;       // keep the anchor point stationary
-  stage.scrollLeft = cx * k - ax;
-  stage.scrollTop = cy * k - ay;
-}
-zoomEl.addEventListener("input", () => setZoom(zoomEl.value === "fit" ? "fit" : parseFloat(zoomEl.value)));
-addEventListener("resize", () => { if (p.zoom === "fit") applyZoom(); });
-
-// ---------- adobe-style navigation ----------
-let space = false;
-const typing = e => /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
-addEventListener("keydown", e => {
-  const mod = e.metaKey || e.ctrlKey;
-  if (e.code === "Space" && !typing(e)) { space = true; stage.style.cursor = "grab"; e.preventDefault(); }
-  else if (mod && (e.key === "+" || e.key === "=")) { e.preventDefault(); setZoom(zPct() * 1.25); }
-  else if (mod && e.key === "-") { e.preventDefault(); setZoom(zPct() / 1.25); }
-  else if (mod && e.key === "0") { e.preventDefault(); setZoom("fit"); }
-  else if (mod && e.key === "1") { e.preventDefault(); setZoom(100); }
+const view = createZoom({
+  stage, select: zoomEl, zoom: p.zoom,
+  size: () => ({w: art.w, h: art.h}),
+  onChange: z => { p.zoom = z; localStorage.setItem("imprint", JSON.stringify(p)); },
 });
-addEventListener("keyup", e => { if (e.code === "Space") { space = false; stage.style.cursor = ""; } });
-stage.addEventListener("pointerdown", e => {          // space + drag = pan
-  if (!space) return;
-  e.preventDefault();
-  const sx = e.clientX, sy = e.clientY, sl = stage.scrollLeft, st = stage.scrollTop;
-  stage.style.cursor = "grabbing";
-  const move = ev => { stage.scrollLeft = sl - (ev.clientX - sx); stage.scrollTop = st - (ev.clientY - sy); };
-  stage.setPointerCapture(e.pointerId);
-  stage.addEventListener("pointermove", move);
-  stage.addEventListener("pointerup", () => { stage.removeEventListener("pointermove", move); stage.style.cursor = "grab"; }, {once: true});
-});
-stage.addEventListener("wheel", e => {                // ⌘/ctrl/alt + wheel (or pinch) = zoom to cursor
-  if (!(e.ctrlKey || e.metaKey || e.altKey)) return;  // plain wheel/trackpad = scroll
-  e.preventDefault();
-  const r = stage.getBoundingClientRect();
-  setZoom(zPct() * Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top);
-}, {passive: false});
 function render() {
   localStorage.setItem("imprint", JSON.stringify(p));
   art = makeSVG();
   stage.innerHTML = art.svg;
-  applyZoom();
+  view.apply();
 }
-document.getElementById("dlsvg").addEventListener("click", () =>
-  saveAs(`imprint-${p.seed}.svg`, new Blob([art.svg], {type: "image/svg+xml"})));
-document.getElementById("dldir").addEventListener("click", async e => {
-  const a = e.currentTarget;
-  try {
-    await pickExportDir();
-    a.textContent = "📁 " + (exportDirName() || "…");
-    a.title = exportDirName() ? `exporting to ${exportDirName()}` : "choose export folder";
-  } catch (err) {
-    a.textContent = "📁 ✗";
-    a.title = err.message;      // hover the button to see why
-    console.warn("export folder:", err);
-  }
-});
-document.getElementById("dlpng").addEventListener("click", async () => {
-  const img = new Image();
-  img.src = URL.createObjectURL(new Blob([art.svg], {type: "image/svg+xml"}));
-  await img.decode();
-  const c = document.createElement("canvas");
-  c.width = art.w; c.height = art.h;   // export = exact artboard pixels
-  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-  c.toBlob(b => saveAs(`imprint-${p.seed}.png`, b), "image/png");
+wireExport({
+  SVG: () => saveAs(`imprint-${p.seed}.svg`, svgBlob(art.svg)),
+  PNG: async () => saveAs(`imprint-${p.seed}.png`, await svgToPNG(art.svg, art.w, art.h)),
 });
 render();
 
