@@ -26,12 +26,16 @@
   .btns select { font: inherit; padding: 4px 6px; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
   h1 { font-size: 14px; margin: 0 0 6px; }
   h1 #res { font-weight: normal; font-variant-numeric: tabular-nums; }
+  #peekbox { display: flex; align-items: center; gap: 8px; margin: 8px 0 2px; }
+  #peekbox canvas { display: block; border-radius: 4px; background: #000; }
+  #peekbox span { color: #999; }
 </style>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="stylesheet" href="mobile.css">
 <body>
 <div id="panel">
   <h1>Stripe Marquee <span id="res"></span></h1>
+  <div id="peekbox"><canvas id="peek"></canvas><span>type, unfiltered</span></div>
   <div id="controls"></div>
   <div class="btns">
     <select id="fmt" title="file type"></select>
@@ -216,10 +220,21 @@ function typeMask() {
   const a = new Float32Array(mw * mh);
   for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3] / 255;   // alpha is the mask
   maskKey = key;
-  return maskData = {LH, a, at(x, y) {
+  return maskData = {LH, a, canvas: c, at(x, y) {
     const u = ((x / W) % 1 + 1) % 1, v = ((y / LH) % 1 + 1) % 1;
     return a[Math.min(mh - 1, (v * mh) | 0) * mw + Math.min(mw - 1, (u * mw) | 0)];
   }};
+}
+
+// Where the type field sits at this moment. Shared by the filter and the type
+// preview — if these two ever computed it separately, the preview would quietly
+// stop showing what the filter actually samples, which is the one thing it is for.
+function scrollAt(time, LH) {
+  const horiz = p.motion === "left" || p.motion === "right";
+  const dir = {up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0], none: [0, 0]}[p.motion];
+  const phase = time === null ? 0 : ((time / p.secs) % 1 + 1) % 1;
+  const period = horiz ? p.wpx : LH;
+  return {tx: dir[0] * period * phase, ty: dir[1] * period * phase, period, phase};
 }
 
 // ---------- generator ----------
@@ -237,11 +252,7 @@ function makeSVG(time = null) {
   const m = typeMask();
 
   // ---- scroll: the type field slides one full period, so the loop is seamless ----
-  const horiz = p.motion === "left" || p.motion === "right";
-  const dir = {up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0], none: [0, 0]}[p.motion];
-  const phase = time === null ? 0 : ((time / p.secs) % 1 + 1) % 1;
-  const period = horiz ? W : m.LH;
-  const tx = dir[0] * period * phase, ty = dir[1] * period * phase;
+  const {tx, ty, period, phase} = scrollAt(time, m.LH);
 
   // ---- stripe filter: fractal columns, sampled row by row ----
   // ONE set of cuts for the whole page, so a column is continuous top to bottom
@@ -323,10 +334,31 @@ const view = createZoom({
 // SMIL — the preview redraws instead. ponytail: full re-render per frame, capped
 // at 30fps; move to per-polygon width patching if a big artboard drags.
 let raf = null, paused = false, t0 = performance.now(), last = 0;
+// The type as the filter sees it: the same mask raster, scrolled to the same
+// moment, with no stripes on top. Wrong type here means no stripe setting can
+// save it — check this first when the output reads as noise.
+const peek = document.getElementById("peek");
+function drawPeek(time) {
+  const m = typeMask(), W = p.wpx, H = p.hpx;
+  const pw = Math.round(Math.min(150, 120 * W / H)), ph = Math.round(pw * H / W);
+  if (peek.width !== pw) { peek.width = pw; peek.height = ph; }
+  const g = peek.getContext("2d");
+  g.fillStyle = p.paper;
+  g.fillRect(0, 0, pw, ph);
+  const {tx, ty} = scrollAt(time, m.LH);
+  const s = pw / W, tileH = m.LH * s;
+  if (tileH < 1) return;                             // type finer than a preview pixel
+  const wrap = (v, n) => ((v % n) + n) % n - n;      // start one tile off-screen
+  for (let y = wrap(ty * s, tileH); y < ph; y += tileH)
+    for (let x = wrap(tx * s, pw); x < pw; x += pw)
+      g.drawImage(m.canvas, x, y, pw, tileH);
+}
+
 function draw(time) {
   art = makeSVG(time);
   stage.innerHTML = art.svg;
   view.apply();
+  drawPeek(time);
   // Legibility readout: rows per text line is the type's vertical resolution and
   // columns its horizontal one. Under ~8 rows/line the letterforms stop reading,
   // which is far and away the most common reason output looks like noise.
