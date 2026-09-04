@@ -26,7 +26,14 @@
   /* compact rows — the sheet has to fit ~20 controls */
   #panel label { grid-template-columns: 78px 1fr 30px; margin: 7px 0; gap: 8px; font-size: 12px; }
   #panel input[type=range] { height: 22px; }
-  #panel input[type=color] { width: 46px; height: 26px; }
+  /* iOS paints a round swatch in a rainbow ring; sized to a rectangle it
+     smears into an ellipse. Drop the native look, paint the value ourselves. */
+  #panel input[type=color] { -webkit-appearance: none; appearance: none;
+                             width: 46px; height: 26px; padding: 0;
+                             border: 1px solid #ccc; border-radius: 6px; background: none; }
+  #panel input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+  #panel input[type=color]::-webkit-color-swatch { border: none; border-radius: 5px; }
+  #panel input[type=color]::-moz-color-swatch { border: none; border-radius: 5px; }
   #panel input[type=checkbox] { width: 20px; height: 20px; }
   #panel .hint { display: none; }                    /* desktop reads the prose */
   #panel hr { margin: 10px 0 4px; }
