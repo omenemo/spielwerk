@@ -1,39 +1,41 @@
-/* Shared phone/tablet layout for spielwerk tools. Loaded after each tool's
-   inline <style>, so these rules win inside the query. Desktop is untouched.
-   Portrait phones stack: artboard on top, panel as a scrollable bottom sheet. */
+/* Shared phone layout for spielwerk tools. Loaded after each tool's inline
+   <style>, so these rules win inside the query. Desktop is untouched.
+   Artboard owns the screen; controls are a bottom sheet, collapsed to its
+   title bar until tapped (mobile.js toggles .open on #panel). */
 @media (max-width: 720px) {
   html, body { height: 100dvh; }
   body { flex-direction: column; }
 
-  #stage { order: 1; flex: 1 1 auto; min-height: 0; padding: 12px; }
+  #stage { order: 1; flex: 1 1 auto; min-height: 0; padding: 10px; }
 
   #panel { order: 2; width: auto; max-width: none; margin: 0; flex: 0 0 auto;
-           align-self: stretch; max-height: 44dvh; overflow-y: auto;
-           overscroll-behavior: contain; border-radius: 14px 14px 0 0;
-           padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
-           box-shadow: 0 -2px 14px rgba(0,0,0,.18); }
-  #panel h1 { position: sticky; top: -10px; z-index: 1; background: #fff;
-              margin: 0 -14px 6px; padding: 6px 14px 8px; }
+           align-self: stretch; border-radius: 14px 14px 0 0;
+           padding: 0 12px calc(10px + env(safe-area-inset-bottom));
+           box-shadow: 0 -2px 14px rgba(0,0,0,.18);
+           max-height: 46px; overflow: hidden;      /* collapsed: title bar only */
+           transition: max-height .2s ease; }
+  #panel.open { max-height: 58dvh; overflow-y: auto; overscroll-behavior: contain; }
 
-  /* fat touch targets; 16px inputs stop iOS zooming on focus */
-  #panel label { grid-template-columns: 96px 1fr 44px; margin: 14px 0; }
-  #panel input[type=range] { height: 30px; }
-  #panel input[type=checkbox] { width: 22px; height: 22px; }
-  #panel input[type=color] { width: 52px; height: 32px; }
+  #panel h1 { position: sticky; top: 0; z-index: 1; background: #fff;
+              margin: 0 -12px 2px; padding: 13px 12px 9px; cursor: pointer;
+              display: flex; justify-content: space-between; align-items: center;
+              user-select: none; }
+  #panel h1::after { content: "▾"; color: #888; font-size: 12px; }
+  #panel.open h1::after { content: "▴"; }
+
+  /* compact rows — the sheet has to fit ~20 controls */
+  #panel label { grid-template-columns: 78px 1fr 30px; margin: 7px 0; gap: 8px; font-size: 12px; }
+  #panel input[type=range] { height: 22px; }
+  #panel input[type=color] { width: 46px; height: 26px; }
+  #panel input[type=checkbox] { width: 20px; height: 20px; }
+  #panel .hint { display: none; }                    /* desktop reads the prose */
+  #panel hr { margin: 10px 0 4px; }
+  /* 16px keeps iOS from zooming the page on focus */
   #panel select, #panel input[type=number], #panel input[type=file],
-  .btns a, .btns select { font-size: 16px; min-height: 38px; }
+  .btns a, .btns select { font-size: 16px; }
+  #panel input[type=number] { width: 64px; }
+  .btns { margin-top: 12px; padding-bottom: 4px; }
   .btns a { padding: 9px 0; }
 
-  /* bottom-right would sit under the sheet */
-  #viewbox { top: 10px; right: 10px; bottom: auto; padding: 6px 10px; }
-}
-
-/* Landscape phones keep the side-by-side layout, just narrower. */
-@media (max-width: 720px) and (orientation: landscape) {
-  body { flex-direction: row; }
-  #stage { order: 0; padding: 10px; }
-  #panel { max-height: 100dvh; width: 240px; border-radius: 0;
-           padding-bottom: 12px; box-shadow: 2px 0 14px rgba(0,0,0,.18); }
-  #panel label { grid-template-columns: 84px 1fr 40px; margin: 10px 0; }
-  #viewbox { top: auto; bottom: 10px; }
+  #viewbox { top: 10px; right: 10px; bottom: auto; padding: 5px 9px; }
 }
