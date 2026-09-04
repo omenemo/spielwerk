@@ -65,6 +65,7 @@
 <script src="export.js"></script>
 <script src="zoom.js"></script>
 <script src="mobile.js"></script>
+<script src="sliders.js"></script>
 <script type="module">
 import * as THREE from "https://esm.sh/three@0.160.0";
 import { SVGLoader } from "https://esm.sh/three@0.160.0/examples/jsm/loaders/SVGLoader.js";
@@ -133,7 +134,7 @@ for (const [key, type, opt] of DEFS) {
   } else {
     input = document.createElement("input");
     input.type = type;
-    if (type === "range") Object.assign(input, {min: opt.min, max: opt.max, step: opt.step});
+    if (type === "range") { Object.assign(input, {min: opt.min, max: opt.max, step: opt.step}); input.dataset.def = opt.value; }
     if (type === "checkbox") input.checked = p[key]; else input.value = p[key];
   }
   label.append(input);

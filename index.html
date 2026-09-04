@@ -69,7 +69,9 @@
     { file: "tools/logo-extruder.html", name: "Logo Extruder",
       desc: "Upload a 2D logo (SVG or image) and extrude it into 3D. SVG becomes true beveled geometry, raster art is stacked into slices. Spin, rock or orbit on any axis, metal shading, uploadable background image, PNG and looping GIF export." },
     { file: "tools/stripe-marquee.html", name: "Stripe Marquee",
-      desc: "Type rendered as a line screen: fractal columns of variable width, sheared into a grid, each stripe thickening where a letterform passes under it. The text is never drawn — it exists only in the thickness, so it scrolls as a pulse through the stripes. SVG, PNG and looping GIF export." }
+      desc: "Type rendered as a line screen: fractal columns of variable width, sheared into a grid, each stripe thickening where a letterform passes under it. The text is never drawn — it exists only in the thickness, so it scrolls as a pulse through the stripes. SVG, PNG and looping GIF export." },
+    { file: "tools/font-remixer.html", name: "Font Remixer",
+      desc: "Load any static font (.ttf/.otf) and run it through switchable filters. Simplify: roundings resolve into fewer visible anchor points while still following the original outline — exportable as installable .otf or as two point-compatible masters that fuse into a true variable font with a Simplify axis. Centerline: the letterforms are thinned to a single-path skeleton and an uploadable SVG stamp is placed along it at regular spacing. Ghost of the original, SVG/PNG export." }
   ];
 
   const slug = t => t.file.replace(/^tools\/|\.html$/g, "");   // tools/logo-extruder.html -> logo-extruder

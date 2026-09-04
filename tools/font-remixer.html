@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Font Remixer — filter-based typeface modification</title>
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  body { font: 13px/1.4 system-ui, sans-serif; margin: 0; display: flex; background: #e9e7e2; }
+  #panel { width: 264px; margin: 16px; padding: 14px 18px; background: #fff; border-radius: 8px;
+           box-shadow: 0 2px 12px rgba(0,0,0,.15); box-sizing: border-box; flex-shrink: 0;
+           align-self: flex-start; max-height: calc(100vh - 32px); overflow-y: auto; }
+  #panel label { display: grid; grid-template-columns: 90px 1fr 38px; align-items: center; margin: 10px 0; gap: 6px; }
+  #panel label span:first-child { color: #444; }
+  #panel input[type=range] { width: 100%; min-width: 0; margin: 0; }
+  #panel input[type=color], #panel select, #panel input[type=checkbox] { justify-self: end; grid-column: 2 / 4; }
+  #panel input[type=text] { grid-column: 2 / 4; font: inherit; min-width: 0; }
+  #panel textarea { grid-column: 2 / 4; font: inherit; min-width: 0; resize: vertical; }
+  #panel input[type=file] { grid-column: 1 / 4; font: inherit; }
+  #panel input[type=number] { width: 58px; box-sizing: border-box; font: inherit; }
+  #panel output { text-align: right; font-variant-numeric: tabular-nums; }
+  #fontname { grid-column: 1 / 4; color: #888; font-size: 12px; }
+  #stage { flex: 1; display: flex; overflow: auto; padding: 32px; outline: none; }
+  #stage:focus svg { outline: 2px solid rgba(59,130,246,.5); outline-offset: -2px; }
+  #caret { animation: caretblink 1.1s steps(2, start) infinite; }
+  @keyframes caretblink { to { opacity: 0; } }
+  #stage svg { display: block; margin: auto; flex-shrink: 0; box-shadow: 0 4px 24px rgba(0,0,0,.18); }
+  #viewbox { position: fixed; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 8px;
+             background: #fff; border-radius: 8px; padding: 8px 12px; box-shadow: 0 2px 12px rgba(0,0,0,.15); }
+  #viewbox span { color: #444; }
+  #viewbox select { font: inherit; padding: 3px 6px; }
+  .btns { display: flex; gap: 8px; margin-top: 16px; }
+  .btns a { flex: 1; text-align: center; padding: 7px 0; border-radius: 8px; background: #3b82f6; color: #fff; text-decoration: none; cursor: pointer; }
+  .btns select { font: inherit; padding: 4px 6px; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
+  h1 { font-size: 14px; margin: 0 0 6px; }
+</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="stylesheet" href="mobile.css">
+<body>
+<div id="panel">
+  <h1>Font Remixer</h1>
+  <div id="controls"></div>
+  <div class="btns">
+    <select id="fmt" title="file type"></select>
+    <a id="dl">⬇ export</a>
+    <a id="dldir" title="choose export folder">📁 …</a>
+  </div>
+</div>
+<div id="stage"></div>
+<div id="viewbox">
+  <span>view</span>
+  <select id="zoom">
+    <option value="fit">scale to fit</option>
+    <option>10%</option><option>25%</option><option>50%</option><option>75%</option>
+    <option>100%</option><option>150%</option><option>200%</option>
+  </select>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js"></script>
+<script src="export.js"></script>
+<script src="zoom.js"></script>
+<script src="mobile.js"></script>
+<script src="sliders.js"></script>
+<script>
+// ---------- parameters ----------
+// 4th element ties a control to one filter; untagged controls are always visible.
+const DEFS = [
+  ["text",     "textarea", {value: "Cinetype", label: "string"}],
+  ["size",     "range",  {min: 2, max: 4000, step: 1, value: 300, label: "font size px"}],
+  ["lineh",    "range",  {min: 20, max: 400, step: 1, value: 100, label: "line height %"}],
+  ["xscale",   "range",  {min: 1, max: 400, step: 1, value: 100, label: "x scale %"}],
+  ["yscale",   "range",  {min: 1, max: 400, step: 1, value: 100, label: "y scale %"}],
+  ["track",    "range",  {min: -20, max: 200, step: 1, value: 0, label: "tracking %"}],
+  ["gapx",     "range",  {min: 0, max: 300, step: 5, value: 0, label: "word gap %"}],
+  ["basex",    "range",  {min: -100, max: 100, step: 1, value: 0, label: "baseline x %"}],
+  ["basey",    "range",  {min: -100, max: 100, step: 1, value: 0, label: "baseline y %"}],
+  ["filter",   "select", {options: ["simplify", "centerline"], value: "simplify", label: "filter"}],
+  ["simplify", "range",  {min: 0, max: 100, step: 1, value: 30, label: "simplify"}, "simplify"],
+  ["spacing",  "range",  {min: 4, max: 80, step: 1, value: 14, label: "spacing px"}, "centerline"],
+  ["stamp",    "range",  {min: 2, max: 120, step: 1, value: 8, label: "stamp scale"}, "centerline"],
+  ["stampRot", "range",  {min: -180, max: 180, step: 1, value: 0, label: "stamp rot °"}, "centerline"],
+  ["stampX",   "range",  {min: -60, max: 60, step: 1, value: 0, label: "stamp x px"}, "centerline"],
+  ["stampY",   "range",  {min: -60, max: 60, step: 1, value: 0, label: "stamp y px"}, "centerline"],
+  ["orient",   "select", {options: ["along path", "upright"], value: "along path", label: "stamps"}, "centerline"],
+  ["ghost",    "select", {options: ["hidden", "outline"], value: "outline", label: "original"}],
+  ["ink",      "color",  {value: "#111111", label: "ink"}],
+  ["paper",    "color",  {value: "#f4f2ee", label: "paper"}]
+];
+const p = {};
+const saved = JSON.parse(localStorage.getItem("font-remixer") || "{}");
+const controls = document.getElementById("controls");
+
+// font file input + name readout (font itself is not persisted — too big for localStorage)
+{
+  const row = document.createElement("label");
+  const inp = Object.assign(document.createElement("input"), {type: "file", accept: ".ttf,.otf,.woff"});
+  const name = Object.assign(document.createElement("span"), {id: "fontname", textContent: "loading default font…"});
+  row.append(inp, name);
+  inp.addEventListener("input", async () => {
+    if (!inp.files[0]) return;
+    try { setFont(opentype.parse(await inp.files[0].arrayBuffer())); }
+    catch (e) { name.textContent = "could not parse: " + e.message; }
+  });
+  controls.append(row);
+}
+
+// ---------- artboard size (exact pixels) ----------
+p.wpx = +saved.wpx || 2000;
+p.hpx = +saved.hpx || 1000;
+{
+  const wIn = Object.assign(document.createElement("input"), {type: "number", min: 100, max: 8000, value: p.wpx});
+  const hIn = Object.assign(document.createElement("input"), {type: "number", min: 100, max: 8000, value: p.hpx});
+  const preset = document.createElement("select");
+  for (const o of ["custom", "2:3", "3:4", "4:5", "1:1", "9:16"]) preset.append(new Option(o, o));
+  const swap = Object.assign(document.createElement("button"), {textContent: "⇄", title: "swap width/height"});
+  swap.style.cssText = "font:inherit;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer";
+  p.lock = saved.lock ?? false;
+  const lock = Object.assign(document.createElement("button"), {title: "lock aspect ratio"});
+  lock.style.cssText = "font:inherit;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer";
+  const drawLock = () => { lock.textContent = p.lock ? "🔒" : "🔓"; lock.style.background = p.lock ? "#eef" : "#fff"; };
+  drawLock();
+  lock.addEventListener("click", () => { p.lock = !p.lock; drawLock(); localStorage.setItem("font-remixer", JSON.stringify(p)); });
+
+  const sizeRow = document.createElement("label");
+  sizeRow.style.cssText = "display:flex;justify-content:space-between;align-items:center";
+  sizeRow.innerHTML = "<span>artboard px</span>";
+  const sizeBox = document.createElement("span");
+  sizeBox.style.cssText = "display:flex;align-items:center;gap:4px";
+  sizeBox.append(wIn, "×", hIn, lock);
+  sizeRow.append(sizeBox);
+
+  const presetRow = document.createElement("label");
+  presetRow.innerHTML = "<span>aspect</span>";
+  const presetBox = document.createElement("span");
+  presetBox.style.cssText = "display:flex;align-items:center;gap:6px;grid-column:2/4;justify-self:end";
+  presetBox.append(preset, swap);
+  presetRow.append(presetBox);
+
+  let ratio = p.hpx / p.wpx;                     // locked aspect, frozen at lock time
+  lock.addEventListener("click", () => { if (p.lock) ratio = p.hpx / p.wpx; });
+  const apply = soft => {
+    p.wpx = Math.max(100, Math.min(8000, +wIn.value || p.wpx));
+    p.hpx = Math.max(100, Math.min(8000, +hIn.value || p.hpx));
+    if (!soft) { wIn.value = p.wpx; hIn.value = p.hpx; ratio = p.hpx / p.wpx; }
+    render();                                    // render() persists — saves on every keystroke
+  };
+  const onEdit = (src, other, factor) => soft => {
+    if (p.lock) other.value = Math.round((+src.value || 100) * factor());
+    else preset.value = "custom";
+    apply(soft);
+  };
+  const wEdit = onEdit(wIn, hIn, () => ratio), hEdit = onEdit(hIn, wIn, () => 1 / ratio);
+  wIn.addEventListener("input", () => wEdit(true));    // live: saves while typing, no clamp-fight
+  wIn.addEventListener("change", () => wEdit(false));  // commit: normalize the field
+  hIn.addEventListener("input", () => hEdit(true));
+  hIn.addEventListener("change", () => hEdit(false));
+  preset.addEventListener("input", () => {
+    if (preset.value === "custom") return;
+    const [a, b] = preset.value.split(":").map(Number);
+    hIn.value = Math.round(p.wpx * b / a);       // width is the anchor
+    apply();
+  });
+  swap.addEventListener("click", () => {
+    [wIn.value, hIn.value] = [hIn.value, wIn.value];
+    preset.value = "custom";
+    apply();
+  });
+  controls.append(sizeRow, presetRow);
+}
+
+let filterRow;                                    // the stamp picker slots in after this
+let textField;                                    // panel twin of the artboard text
+for (const [key, type, opt, flt] of DEFS) {
+  p[key] = key in saved ? saved[key] : opt.value;
+  if (type === "select" && !opt.options.includes(p[key])) p[key] = opt.value;
+  const label = document.createElement("label");
+  if (flt) label.dataset.filter = flt;
+  const name = document.createElement("span");
+  name.textContent = opt.label || key;
+  label.append(name);
+  let input;
+  if (type === "select") {
+    input = document.createElement("select");
+    for (const o of opt.options) input.append(new Option(o, o, o === p[key], o === p[key]));
+  } else if (type === "textarea") {
+    input = document.createElement("textarea");
+    input.rows = 2;
+    input.value = p[key];
+  } else {
+    input = document.createElement("input");
+    input.type = type;
+    if (type === "range") { Object.assign(input, {min: opt.min, max: opt.max, step: opt.step}); input.dataset.def = opt.value; }
+    input.value = p[key];
+  }
+  label.append(input);
+  let out;
+  if (type === "range") { out = document.createElement("output"); out.value = p[key]; label.append(out); }
+  input.addEventListener("input", () => {
+    p[key] = type === "range" ? +input.value : input.value;
+    if (out) out.value = input.value;
+    if (key === "filter") syncVis();
+    render();
+  });
+  controls.append(label);
+  if (key === "filter") filterRow = label;
+  if (key === "text") textField = input;
+}
+
+// stamp picker (centerline only): any SVG becomes the item placed along the path.
+// Sits right below the filter dropdown, with a live preview of the current stamp.
+let stamp = {inner: '<circle r="1"/>', w: 2, h: 2, cx: 0, cy: 0};     // default: a dot
+{
+  const row = document.createElement("label");
+  row.dataset.filter = "centerline";
+  const name = document.createElement("span");
+  name.textContent = "stamp svg";
+  const inp = Object.assign(document.createElement("input"), {type: "file", accept: ".svg", title: "SVG placed along the centerline"});
+  inp.style.gridColumn = "2 / 4";
+  const prev = document.createElement("div");
+  prev.style.cssText = "grid-column: 1 / 4; height: 48px; display: flex; align-items: center; justify-content: center; background: #f6f5f2; border: 1px solid #ddd; border-radius: 6px;";
+  const setPreview = () => {
+    prev.innerHTML = `<svg viewBox="${stamp.cx - stamp.w / 2} ${stamp.cy - stamp.h / 2} ${stamp.w} ${stamp.h}" width="40" height="40" fill="#111">${stamp.inner}</svg>`;
+  };
+  setPreview();
+  inp.addEventListener("input", async () => {
+    if (!inp.files[0]) return;
+    const root = new DOMParser().parseFromString(await inp.files[0].text(), "image/svg+xml").documentElement;
+    const vb = (root.getAttribute("viewBox") || "").split(/[\s,]+/).map(Number);
+    const [x, y, w, h] = vb.length === 4 && !vb.some(isNaN) ? vb
+      : [0, 0, parseFloat(root.getAttribute("width")) || 10, parseFloat(root.getAttribute("height")) || 10];
+    stamp = {inner: root.innerHTML, w, h, cx: x + w / 2, cy: y + h / 2};
+    setPreview();
+    render();
+  });
+  row.append(name, inp, prev);
+  filterRow.after(row);
+}
+
+function syncVis() {
+  for (const row of controls.querySelectorAll("[data-filter]"))
+    row.style.display = row.dataset.filter === p.filter ? "" : "none";
+}
+syncVis();
+
+const lerp = (a, b, t) => a + (b - a) * t;
+const f = n => +n.toFixed(2);
+const d = cmds => cmds.map(c =>
+  c.type === "M" ? `M${f(c.x)} ${f(c.y)}` :
+  c.type === "L" ? `L${f(c.x)} ${f(c.y)}` :
+  c.type === "C" ? `C${f(c.x1)} ${f(c.y1)} ${f(c.x2)} ${f(c.y2)} ${f(c.x)} ${f(c.y)}` :
+  c.type === "Q" ? `Q${f(c.x1)} ${f(c.y1)} ${f(c.x)} ${f(c.y)}` : "Z").join("");
+
+// ---------- filter: simplify — fewer visible anchors in the roundings ----------
+// Ramer–Douglas–Peucker over the glyph's own on-curve anchors: anchors that
+// deviate less than eps from the chord of their neighbours are slid ONTO that
+// chord (not deleted — collinear points are invisible). Curve segments inside a
+// straightened run get their control points flattened onto the segment too.
+// Because every command survives with its type intact, the remixed glyphs are
+// point-compatible with the originals → the two can be masters of a variable font.
+function rdpKeep(pts, keep, a, b, eps) {          // mark anchors that must survive
+  const A = pts[a], B = pts[b];
+  const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy) || 1;
+  let dmax = -1, idx = -1;
+  for (let i = a + 1; i < b; i++) {
+    const d = Math.abs((pts[i].x - A.x) * dy - (pts[i].y - A.y) * dx) / len;
+    if (d > dmax) { dmax = d; idx = i; }
+  }
+  if (idx < 0 || dmax <= eps) return;
+  keep[idx] = true;
+  rdpKeep(pts, keep, a, idx, eps);
+  rdpKeep(pts, keep, idx, b, eps);
+}
+
+const proj = (P, A, B) => {                       // P projected onto segment AB
+  const dx = B.x - A.x, dy = B.y - A.y, L = dx * dx + dy * dy || 1;
+  const t = Math.min(1, Math.max(0, ((P.x - A.x) * dx + (P.y - A.y) * dy) / L));
+  return {x: A.x + t * dx, y: A.y + t * dy};
+};
+
+function remixContour(cmds, eps) {                // cmds: one contour, M…(Z)
+  const segs = cmds.filter(c => c.type !== "M" && c.type !== "Z");
+  if (segs.length < 3 || eps <= 0) return cmds;
+  const closed = cmds[cmds.length - 1].type === "Z";
+  const pts = [{x: cmds[0].x, y: cmds[0].y}, ...segs.map(c => ({x: c.x, y: c.y}))];
+  const last = pts.length - 1;
+  const keep = new Array(pts.length).fill(false);
+  keep[0] = keep[last] = true;                    // seam anchors always survive
+  if (closed) {                                   // split the ring at the far point, RDP both arcs
+    const dup = Math.hypot(pts[last].x - pts[0].x, pts[last].y - pts[0].y) < 1e-6;
+    const n = dup ? last : pts.length;            // ring length without the duplicate seam point
+    let far = 0, dmax = -1;
+    for (let i = 1; i < n; i++) {
+      const dd = (pts[i].x - pts[0].x) ** 2 + (pts[i].y - pts[0].y) ** 2;
+      if (dd > dmax) { dmax = dd; far = i; }
+    }
+    keep[far] = true;
+    rdpKeep(pts, keep, 0, far, eps);
+    rdpKeep(pts.concat(dup ? [] : [pts[0]]), keep, far, n, eps);
+  } else {
+    rdpKeep(pts, keep, 0, last, eps);
+  }
+  const np = pts.map(q => ({...q}));              // dropped anchors → onto the kept chord
+  for (let a = 0, i = 1; i < pts.length; i++) {
+    if (!keep[i]) continue;
+    for (let j = a + 1; j < i; j++) np[j] = proj(pts[j], pts[a], pts[i]);
+    a = i;
+  }
+  const out = [{type: "M", x: np[0].x, y: np[0].y}];
+  for (let i = 0; i < segs.length; i++) {
+    const c = segs[i], A = np[i], B = np[i + 1];
+    const flat = !keep[i] || !keep[i + 1];        // segment lives in a straightened run
+    if (c.type === "C") out.push({type: "C", x: B.x, y: B.y,
+      x1: flat ? lerp(A.x, B.x, 1 / 3) : c.x1, y1: flat ? lerp(A.y, B.y, 1 / 3) : c.y1,
+      x2: flat ? lerp(A.x, B.x, 2 / 3) : c.x2, y2: flat ? lerp(A.y, B.y, 2 / 3) : c.y2});
+    else if (c.type === "Q") out.push({type: "Q", x: B.x, y: B.y,
+      x1: flat ? (A.x + B.x) / 2 : c.x1, y1: flat ? (A.y + B.y) / 2 : c.y1});
+    else out.push({type: "L", x: B.x, y: B.y});
+  }
+  if (closed) out.push({type: "Z"});
+  return out;
+}
+
+function remix(cmds, eps) {
+  const out = [];
+  let contour = [];
+  const flush = () => { if (contour.length) out.push(...remixContour(contour, eps)); contour = []; };
+  for (const c of cmds) {
+    if (c.type === "M") flush();
+    contour.push(c);
+    if (c.type === "Z") flush();
+  }
+  flush();
+  return out;
+}
+
+// eps: slider 0–100 → deviation tolerance up to 15 % of the em
+const epsFor = span => p.simplify / 100 * 0.15 * span;
+
+// ---------- filter: centerline — skeleton of the letterforms, stamped ----------
+// Rasterise the glyphs, thin to a 1px skeleton (Zhang–Suen), trace the skeleton
+// into polylines, then place the stamp SVG along them at regular arc length.
+function skeletonize(bin, w, h) {                 // 0/1 grid, thinned in place
+  const del = [];
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const step of [0, 1]) {
+      del.length = 0;
+      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        if (!bin[i]) continue;
+        const p2 = bin[i - w], p3 = bin[i - w + 1], p4 = bin[i + 1], p5 = bin[i + w + 1],
+              p6 = bin[i + w], p7 = bin[i + w - 1], p8 = bin[i - 1], p9 = bin[i - w - 1];
+        const B = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
+        if (B < 2 || B > 6) continue;
+        const s = [p2, p3, p4, p5, p6, p7, p8, p9, p2];
+        let A = 0;
+        for (let k = 0; k < 8; k++) if (!s[k] && s[k + 1]) A++;
+        if (A !== 1) continue;
+        if (step === 0 ? p2 * p4 * p6 || p4 * p6 * p8 : p2 * p4 * p8 || p2 * p6 * p8) continue;
+        del.push(i);
+      }
+      for (const i of del) bin[i] = 0;
+      if (del.length) changed = true;
+    }
+  }
+}
+
+// ponytail: greedy walk breaks paths at junctions instead of resolving them — fine
+// for stamping; build a proper graph if strokes must stay continuous through joins.
+function trace(bin, w, h) {                       // consume skeleton → pixel polylines
+  const nbr = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+  const cells = [];
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++)
+    if (bin[y * w + x])
+      cells.push([x, y, nbr.reduce((n, [dx, dy]) => n + bin[(y + dy) * w + x + dx], 0)]);
+  cells.sort((a, b) => a[2] - b[2]);              // endpoints first, closed loops last
+  const paths = [];
+  for (const [sx, sy] of cells) {
+    if (!bin[sy * w + sx]) continue;
+    let x = sx, y = sy;
+    const path = [[x, y]];
+    bin[y * w + x] = 0;
+    for (;;) {
+      const step = nbr.find(([dx, dy]) => bin[(y + dy) * w + x + dx]);
+      if (!step) break;
+      x += step[0]; y += step[1];
+      bin[y * w + x] = 0;
+      path.push([x, y]);
+    }
+    paths.push(path);                           // even 1px paths — the dot of an "i" thins to almost nothing
+  }
+  return paths;
+}
+
+const smooth = path => path.map((_, i) => {       // ±2 moving average → usable tangents
+  let sx = 0, sy = 0, n = 0;
+  for (let j = Math.max(0, i - 2); j <= Math.min(path.length - 1, i + 2); j++) { sx += path[j][0]; sy += path[j][1]; n++; }
+  return [sx / n, sy / n];
+});
+
+function stampPoints(paths, spacing) {            // regular arc-length sampling
+  const out = [];
+  for (const raw of paths) {
+    if (raw.length < 2) { out.push({x: raw[0][0], y: raw[0][1], a: 0}); continue; }
+    const path = smooth(raw);
+    let need = 0, acc = 0, a = 0;
+    for (let i = 1; i < path.length; i++) {
+      const [x0, y0] = path[i - 1], [x1, y1] = path[i];
+      const seg = Math.hypot(x1 - x0, y1 - y0);
+      if (!seg) continue;
+      a = Math.atan2(y1 - y0, x1 - x0);
+      while (need <= acc + seg) {
+        const t = (need - acc) / seg;
+        out.push({x: x0 + t * (x1 - x0), y: y0 + t * (y1 - y0), a});
+        need += spacing;
+      }
+      acc += seg;
+    }
+    // stroke terminals: if the leftover after the last stamp is over half a
+    // spacing, cap the path end so stems don't look cut short
+    if (acc - (need - spacing) >= spacing / 2)
+      out.push({x: path[path.length - 1][0], y: path[path.length - 1][1], a});
+  }
+  return out;
+}
+
+async function centerlineInk(glyphCmds, W, H) {
+  const k = Math.min(1, 1400 / Math.max(W, H));   // cap raster size, map coords back by /k
+  const bw = Math.max(1, Math.round(W * k)), bh = Math.max(1, Math.round(H * k));
+  const src = `<svg xmlns="http://www.w3.org/2000/svg" width="${bw}" height="${bh}" viewBox="0 0 ${W} ${H}">`
+    + glyphCmds.map(c => `<path d="${d(c)}"/>`).join("") + `</svg>`;
+  const px = await rasterise(src, bw, bh);
+  const bin = new Uint8Array(bw * bh);
+  let inkPx = 0;
+  for (let i = 0; i < bin.length; i++) inkPx += bin[i] = px[i * 4 + 3] > 128 ? 1 : 0;
+  skeletonize(bin, bw, bh);
+  const paths = trace(bin, bw, bh);
+  // thinning erodes stroke ends by ~half the stroke width — push open path ends
+  // back out along their tangent so stamps reach the actual stroke terminals
+  // ponytail: also nudges junction-cut branches into their joins; harmless visually
+  const halfW = inkPx / (paths.reduce((s, q) => s + q.length, 0) || 1) / 2;
+  for (const path of paths) {
+    const n = path.length;
+    if (n < 2 || Math.hypot(path[0][0] - path[n - 1][0], path[0][1] - path[n - 1][1]) < 3) continue;
+    const r = Math.min(4, n - 1);
+    const ext = (a, b) => {
+      const dx = a[0] - b[0], dy = a[1] - b[1], L = Math.hypot(dx, dy) || 1;
+      return [a[0] + dx / L * halfW, a[1] + dy / L * halfW];
+    };
+    path.push(ext(path[n - 1], path[n - 1 - r]));
+    path.unshift(ext(path[0], path[r]));
+  }
+  const pts = stampPoints(paths, p.spacing * k);
+  const s = p.stamp / Math.max(stamp.w, stamp.h);
+  // transform chain: place on path → align to tangent → offset in the stamp's own
+  // frame (so x/y shift relative to the stroke direction) → own rotation → scale
+  const uses = pts.map(q => `<use href="#stamp" transform="translate(${f(q.x / k)} ${f(q.y / k)})`
+    + (p.orient === "along path" ? ` rotate(${f(q.a * 180 / Math.PI)})` : "")
+    + (p.stampX || p.stampY ? ` translate(${p.stampX} ${p.stampY})` : "")
+    + (p.stampRot ? ` rotate(${p.stampRot})` : "") + ` scale(${f(s)})"/>`).join("");
+  return `<defs><g id="stamp" transform="translate(${f(-stamp.cx)} ${f(-stamp.cy)})">${stamp.inner}</g></defs>${uses}`;
+}
+
+// ---------- layout (stripe-marquee's typeface parameters) ----------
+let font = null;
+const sxf = () => Math.max(1, p.xscale) / 100;
+const syf = () => Math.max(1, p.yscale) / 100;
+const lineHpx = () => (font.ascender - font.descender) * p.size / font.unitsPerEm * syf() * p.lineh / 100;
+function lineLayout(t) {                          // pen position per glyph, in px
+  const scale = p.size / font.unitsPerEm, sx = sxf();
+  const glyphs = font.stringToGlyphs(t), xs = [];
+  let x = 0;
+  for (let i = 0; i < glyphs.length; i++) {
+    xs.push(x);
+    let adv = glyphs[i].advanceWidth * scale * sx + p.track / 100 * p.size;
+    if (t[i] === " ") adv += p.gapx / 100 * p.size;
+    if (i + 1 < glyphs.length) adv += font.getKerningValue(glyphs[i], glyphs[i + 1]) * scale * sx;
+    x += adv;
+  }
+  return {glyphs, xs, width: x};
+}
+const xf = (cmds, px, py, sx, sy) =>                // scale outline about the pen point
+  sx === 1 && sy === 1 ? cmds : cmds.map(c => {
+    const n = {...c};
+    for (const k of ["x", "x1", "x2"]) if (k in n) n[k] = px + (n[k] - px) * sx;
+    for (const k of ["y", "y1", "y2"]) if (k in n) n[k] = py + (n[k] - py) * sy;
+    return n;
+  });
+
+// ---------- generator ----------
+async function makeSVG() {
+  const pad = p.size * 0.25;
+  const scale = p.size / font.unitsPerEm;
+  const sx = sxf(), sy = syf();
+  const lines = p.text.split("\n");
+  const lineH = lineHpx();
+  const layout = lines.map(lineLayout);
+  const W = p.wpx, H = p.hpx;
+  const ox = pad + p.basex / 100 * W, oy = p.basey / 100 * H;
+  const glyphCmds = [];
+  layout.forEach((l, li) => {
+    const base = pad + oy + font.ascender * scale * sy + li * lineH;
+    l.glyphs.forEach((g, i) =>
+      glyphCmds.push(xf(g.getPath(ox + l.xs[i], base, p.size).commands, ox + l.xs[i], base, sx, sy)));
+  });
+  const ghosts = p.ghost === "outline"
+    ? glyphCmds.map(c => `<path d="${d(c)}" fill="none" stroke="#bbb" stroke-width="1"/>`).join("") : "";
+  const ink = p.filter === "centerline"
+    ? await centerlineInk(glyphCmds, W, H)
+    : glyphCmds.map(c => `<path d="${d(remix(c, epsFor(p.size)))}"/>`).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+    + `<rect width="${W}" height="${H}" fill="${p.paper}"/>`
+    + ghosts + `<g fill="${p.ink}">${ink}</g></svg>`;
+  return {w: W, h: H, svg};
+}
+
+// ---------- font export: remix every glyph, rebuild as OTF ----------
+// opentype.js only writes CFF outlines, so export is .otf (works everywhere .ttf does).
+// eps = 0 reproduces the original outlines → that build is the neutral VF master.
+function makeFont(eps, style) {
+  const glyphs = [];
+  for (let i = 0; i < font.glyphs.length; i++) {
+    const g = font.glyphs.get(i);
+    const path = new opentype.Path();
+    path.commands = remix(g.path.commands, eps);
+    const opt = {name: g.name || `gid${i}`, advanceWidth: g.advanceWidth, path};
+    if (g.unicode !== undefined) { opt.unicode = g.unicode; opt.unicodes = g.unicodes; }
+    glyphs.push(new opentype.Glyph(opt));
+  }
+  return new opentype.Font({
+    familyName: (font.names.fontFamily?.en || "Font") + " Remix",
+    styleName: style || font.names.fontSubfamily?.en || "Regular",
+    unitsPerEm: font.unitsPerEm, ascender: font.ascender, descender: font.descender,
+    glyphs,
+  });
+}
+
+// Two point-compatible masters + a designspace: fonttools fuses them into a real
+// variable font whose SMPL axis morphs original → remixed (usable in Illustrator).
+const DESIGNSPACE = `<?xml version="1.0" encoding="UTF-8"?>
+<designspace format="4.0">
+  <axes>
+    <axis tag="SMPL" name="Simplify" minimum="0" maximum="100" default="0"/>
+  </axes>
+  <sources>
+    <source filename="remix-master-0.otf">
+      <location><dimension name="Simplify" xvalue="0"/></location>
+    </source>
+    <source filename="remix-master-100.otf">
+      <location><dimension name="Simplify" xvalue="100"/></location>
+    </source>
+  </sources>
+</designspace>
+`;
+const VF_README = `Fuse the two masters into a variable font (needs Python):
+
+    pip install fonttools
+    fonttools varLib remix.designspace -o Remix-VF.otf
+
+Install Remix-VF.otf — the "Simplify" axis (0–100) shows up in
+Illustrator's variable-font slider and morphs original → remixed.
+Axis position 100 equals the simplify value set when exporting.
+If an app rejects the CFF2 flavour, rebuild via fontmake with TTF masters.
+`;
+
+// ---------- render + export ----------
+const stage = document.getElementById("stage");
+
+// ---- on-canvas text editing: the artboard is the primary text input ----
+// Click places the caret, typing inserts at it, arrows/Home/End navigate,
+// Backspace/Delete/Enter and paste behave like a text field. The panel
+// textarea stays in sync as a secondary editor.
+let caret = p.text.length;
+stage.tabIndex = 0;
+stage.title = "type here — click places the caret, Enter breaks the line";
+function drawCaret() {
+  stage.querySelector("#caret")?.remove();
+  const svg = stage.querySelector("svg");
+  if (!svg || !font || document.activeElement !== stage) return;
+  const before = p.text.slice(0, Math.min(caret, p.text.length));
+  const li = before.split("\n").length - 1;
+  const col = before.length - before.lastIndexOf("\n") - 1;
+  const L = lineLayout(p.text.split("\n")[li]);
+  const pad = p.size * 0.25;
+  const cx = pad + p.basex / 100 * art.w + (col < L.xs.length ? L.xs[col] : L.width);
+  const cy = pad + p.basey / 100 * art.h + li * lineHpx();
+  const ch = (font.ascender - font.descender) * p.size / font.unitsPerEm * syf();
+  svg.insertAdjacentHTML("beforeend",
+    `<rect id="caret" x="${f(cx)}" y="${f(cy)}" width="${f(Math.max(1.5, p.size / 100))}" height="${f(ch)}" fill="${p.ink}"/>`);
+}
+const edit = (t, c) => { p.text = t; caret = c; textField.value = t; render(); };
+stage.addEventListener("keydown", e => {
+  if (!font || e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = p.text;
+  caret = Math.min(caret, t.length);
+  const ls = t.lastIndexOf("\n", caret - 1) + 1;                      // line start
+  const le = (i => i < 0 ? t.length : i)(t.indexOf("\n", caret));     // line end
+  const move = c => { caret = Math.max(0, Math.min(t.length, c)); drawCaret(); };
+  if (e.key === "ArrowLeft") move(caret - 1);
+  else if (e.key === "ArrowRight") move(caret + 1);
+  else if (e.key === "Home") move(ls);
+  else if (e.key === "End") move(le);
+  else if (e.key === "ArrowUp")
+    ls ? move(Math.min(t.lastIndexOf("\n", ls - 2) + 1 + (caret - ls), ls - 1)) : move(0);
+  else if (e.key === "ArrowDown") {
+    if (le === t.length) move(t.length);
+    else {
+      const ne = (i => i < 0 ? t.length : i)(t.indexOf("\n", le + 1));
+      move(Math.min(le + 1 + (caret - ls), ne));
+    }
+  }
+  else if (e.key === "Backspace") { if (caret) edit(t.slice(0, caret - 1) + t.slice(caret), caret - 1); }
+  else if (e.key === "Delete") edit(t.slice(0, caret) + t.slice(caret + 1), caret);
+  else if (e.key === "Enter") edit(t.slice(0, caret) + "\n" + t.slice(caret), caret + 1);
+  else if (e.key.length === 1) edit(t.slice(0, caret) + e.key + t.slice(caret), caret + 1);
+  else return;
+  e.preventDefault();
+});
+stage.addEventListener("paste", e => {
+  const s = e.clipboardData.getData("text");
+  if (s) edit(p.text.slice(0, caret) + s + p.text.slice(caret), Math.min(caret, p.text.length) + s.length);
+  e.preventDefault();
+});
+stage.addEventListener("mousedown", e => {       // click → caret at nearest position
+  const svg = stage.querySelector("svg");
+  if (!svg || !font) return;
+  const r = svg.getBoundingClientRect();
+  const sx = (e.clientX - r.left) / r.width * art.w;
+  const sy = (e.clientY - r.top) / r.height * art.h;
+  const lines = p.text.split("\n");
+  const pad = p.size * 0.25;
+  const li = Math.max(0, Math.min(lines.length - 1, Math.floor((sy - pad - p.basey / 100 * art.h) / lineHpx())));
+  const L = lineLayout(lines[li]);
+  const gaps = [...L.xs, L.width];                // caret slots: before each glyph + line end
+  let col = 0, best = Infinity;
+  for (let i = 0; i < gaps.length && i <= lines[li].length; i++) {
+    const d = Math.abs(pad + p.basex / 100 * art.w + gaps[i] - sx);
+    if (d < best) { best = d; col = i; }
+  }
+  caret = lines.slice(0, li).reduce((s, l) => s + l.length + 1, 0) + col;
+  setTimeout(drawCaret);                          // after focus lands on the stage
+});
+stage.addEventListener("focus", drawCaret);
+stage.addEventListener("blur", drawCaret);
+p.zoom = saved.zoom === "fit" || typeof saved.zoom === "number" ? saved.zoom : "fit";
+let art, seq = 0;
+const view = createZoom({
+  stage, select: document.getElementById("zoom"), zoom: p.zoom,
+  size: () => ({w: art.w, h: art.h}),
+  onChange: z => { p.zoom = z; localStorage.setItem("font-remixer", JSON.stringify(p)); },
+});
+async function render() {
+  localStorage.setItem("font-remixer", JSON.stringify(p));
+  if (!font) return;
+  const my = ++seq;                               // centerline is async → drop stale results
+  const a = await makeSVG();
+  if (my !== seq) return;
+  art = a;
+  stage.innerHTML = art.svg;
+  view.apply();
+  drawCaret();                                    // lives in the DOM only, never in exports
+}
+function setFont(fnt) {
+  font = fnt;
+  document.getElementById("fontname").textContent =
+    fnt.names.fullName?.en || fnt.names.fontFamily?.en || "unnamed font";
+  render();
+  // VF masters live or die on this: remix must keep every command and its type
+  const cmds = fnt.charToGlyph("o").path.commands;
+  const rx = remix(cmds, 0.15 * fnt.unitsPerEm);
+  console.assert(rx.length === cmds.length && rx.every((c, i) => c.type === cmds[i].type),
+    "remix must preserve command structure");
+}
+// self-check: a filled bar must thin to a skeleton far smaller than its area
+{
+  const w = 24, h = 10, bin = new Uint8Array(w * h);
+  for (let y = 2; y < 8; y++) for (let x = 2; x < 22; x++) bin[y * w + x] = 1;
+  skeletonize(bin, w, h);
+  const left = bin.reduce((a, b) => a + b, 0);
+  console.assert(left > 0 && left < 40, "skeletonize must reduce a bar to a thin line");
+  console.assert(trace(bin, w, h).length >= 1, "trace must find the skeleton path");
+}
+const otfBlob = fnt => new Blob([fnt.toArrayBuffer()], {type: "font/otf"});
+const needsSimplify = () => {
+  if (p.filter !== "simplify") throw new Error("font export needs the simplify filter — centerline outputs stamps, not glyph outlines");
+};
+wireExport({
+  SVG: () => saveAs(`remix-${p.filter}.svg`, svgBlob(art.svg)),
+  PNG: async () => saveAs(`remix-${p.filter}.png`, await svgToPNG(art.svg, art.w, art.h)),
+  OTF: async setLabel => {
+    needsSimplify();
+    setLabel("building font…");
+    await new Promise(r => setTimeout(r));       // let the label paint before the sync build
+    saveAs(`remix-${p.simplify}.otf`, otfBlob(makeFont(epsFor(font.unitsPerEm))));
+  },
+  "VF masters": async setLabel => {
+    needsSimplify();
+    setLabel("building masters…");
+    await new Promise(r => setTimeout(r));
+    await saveAs("remix-master-0.otf", otfBlob(makeFont(0, "Master0")));
+    await saveAs("remix-master-100.otf", otfBlob(makeFont(epsFor(font.unitsPerEm), "Master100")));
+    await saveAs("remix.designspace", new Blob([DESIGNSPACE], {type: "application/xml"}));
+    await saveAs("README-VF.txt", new Blob([VF_README], {type: "text/plain"}));
+  },
+});
+
+// default font so the tool works before anything is loaded (needs network once)
+fetch("https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/spacemono/SpaceMono-Regular.ttf")
+  .then(r => r.arrayBuffer()).then(b => { if (!font) setFont(opentype.parse(b)); })
+  .catch(() => document.getElementById("fontname").textContent = "load a font file ↑");
+</script>
+</body>
+</html>

@@ -49,6 +49,7 @@
 <script src="export.js"></script>
 <script src="zoom.js"></script>
 <script src="mobile.js"></script>
+<script src="sliders.js"></script>
 <script>
 // ---------- parameters ----------
 const DEFS = [
@@ -157,7 +158,7 @@ for (const [key, type, opt] of DEFS) {
   } else {
     input = document.createElement("input");
     input.type = type;
-    if (type === "range") Object.assign(input, {min: opt.min, max: opt.max, step: opt.step});
+    if (type === "range") { Object.assign(input, {min: opt.min, max: opt.max, step: opt.step}); input.dataset.def = opt.value; }
     input.value = p[key];
   }
   label.append(input);
