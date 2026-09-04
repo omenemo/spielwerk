@@ -25,12 +25,13 @@
   .btns a { flex: 1; text-align: center; padding: 7px 0; border-radius: 8px; background: #3b82f6; color: #fff; text-decoration: none; cursor: pointer; }
   .btns select { font: inherit; padding: 4px 6px; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
   h1 { font-size: 14px; margin: 0 0 6px; }
+  h1 #res { font-weight: normal; font-variant-numeric: tabular-nums; }
 </style>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="stylesheet" href="mobile.css">
 <body>
 <div id="panel">
-  <h1>Stripe Marquee</h1>
+  <h1>Stripe Marquee <span id="res"></span></h1>
   <div id="controls"></div>
   <div class="btns">
     <select id="fmt" title="file type"></select>
@@ -63,14 +64,20 @@ const DEFS = [
   ["motion", "select", {options: ["up", "down", "left", "right", "none"], value: "up"}],
   ["secs",   "range",  {min: 1, max: 40, step: 0.5, value: 12, label: "cycle sec"}],
   ["paper",  "color",  {value: "#000000", label: "paper"}],
-  ["rows",   "range",  {min: 1, max: 120, step: 1, value: 44, label: "grid rows"}],
-  ["skew",   "range",  {min: -60, max: 60, step: 1, value: 14, label: "slant °"}],
+  ["rows",   "range",  {min: 1, max: 240, step: 1, value: 64, label: "grid rows"}],
+  ["rowgap", "range",  {min: 0, max: 70, step: 1, value: 0, label: "row gap %"}],
+  ["rowphase","range", {min: -100, max: 100, step: 1, value: 0, label: "row phase %"}],
+  ["rowlag", "range",  {min: -100, max: 100, step: 1, value: 0, label: "row lag %"}],
+  ["skew",   "range",  {min: -60, max: 60, step: 1, value: 8, label: "slant °"}],
   ["stagger","range",  {min: 0, max: 100, step: 5, value: 0, label: "row offset %"}],
-  ["depth",  "range",  {min: 1, max: 9, step: 1, value: 5, label: "fractal depth"}],
-  ["jitter", "range",  {min: 0, max: 95, step: 5, value: 55, label: "width jitter %"}],
-  ["minw",   "range",  {min: 1, max: 80, step: 1, value: 6, label: "min stripe px"}],
-  ["ink0",   "range",  {min: 0, max: 100, step: 1, value: 14, label: "thin ink %"}],
-  ["ink1",   "range",  {min: 0, max: 100, step: 1, value: 96, label: "thick ink %"}],
+  ["depth",  "range",  {min: 1, max: 9, step: 1, value: 7, label: "fractal depth"}],
+  ["jitter", "range",  {min: 0, max: 95, step: 5, value: 45, label: "width jitter %"}],
+  ["minw",   "range",  {min: 1, max: 80, step: 1, value: 4, label: "min stripe px"}],
+  ["scale",  "select", {options: ["uniform", "proportional"], value: "uniform", label: "ink scale"}],
+  ["ink0",   "range",  {min: 0, max: 200, step: 1, value: 12, label: "thin ink %"}],
+  ["ink1",   "range",  {min: 0, max: 200, step: 1, value: 95, label: "thick ink %"}],
+  ["contrast","range", {min: 20, max: 400, step: 5, value: 150, label: "contrast %"}],
+  ["levels", "range",  {min: 1, max: 8, step: 1, value: 1, label: "levels (1=smooth)"}],
   ["c1",     "color",  {value: "#e8112d", label: "stripe 1"}],
   ["c2",     "color",  {value: "#ff2ec4", label: "stripe 2"}],
   ["c3",     "color",  {value: "#e8112d", label: "stripe 3"}],
@@ -250,20 +257,41 @@ function makeSVG(time = null) {
     split(mid, x1, level - 1);
   })(0, W, p.depth);
 
+  // Ink is measured against the MEAN pitch, not each column's own width. Scaling by
+  // the local slot made a blank wide column print fatter than a solid narrow one,
+  // so thickness encoded the subdivision instead of the type. "proportional" keeps
+  // that older behaviour — decorative, but it cannot be read.
+  const pitch = W / cuts.length;
+  const gamma = 100 / p.contrast;
+  const tone = a => {                                    // alpha -> ink fraction
+    let v = Math.pow(Math.min(1, Math.max(0, a)), gamma);
+    if (p.levels > 1) v = Math.round(v * (p.levels - 1)) / (p.levels - 1);
+    return (p.ink0 + (p.ink1 - p.ink0) * v) / 100;
+  };
+
   const rowH = H / p.rows;
   const shear = Math.tan(p.skew * Math.PI / 180) * rowH;   // how far the top edge leans
+  const bandH = rowH * (1 - p.rowgap / 100);
   const bands = [];
   for (let r = 0; r < p.rows; r++) {
-    const y0 = f(r * rowH), y1 = f((r + 1) * rowH);
+    const y0 = f(r * rowH), y1 = f(r * rowH + bandH);
     const off = ((r * p.stagger / 100) % 1) * W;
+    // How this row reads the type: shifted down the field (phase) and delayed in
+    // the scroll (lag), so rows can echo or trail instead of moving as one block.
+    const sy = r * p.rowphase / 100 * m.LH;
+    const lag = r * p.rowlag / 100 * period * phase;
     for (const [a, b, c] of cuts) {
       // Colour is fixed per column, not per cell: a column that changes colour
       // halfway down reads as an edge and swamps the width pulse.
-      // The type lives in the THICKNESS: every slot draws, filling a centred
-      // fraction of itself set by how much letterform sits under it.
-      const slot = b - a, cx = a + slot / 2, cy = (y0 + y1) / 2;
-      const alpha = m.at(cx + shear / 2 + off - tx, cy - ty);
-      const w = slot * (p.ink0 + (p.ink1 - p.ink0) * alpha) / 100;
+      const slot = b - a, cx = a + slot / 2, cy = r * rowH + bandH / 2;
+      // Area-average the cell: one point per cell aliased the letterform badly.
+      let acc = 0;
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++)
+        acc += m.at(cx + shear / 2 + off - tx + lag + i * slot / 3,
+                    cy - ty + sy + j * bandH / 3);
+      const ink = tone(acc / 9);
+      // uniform: ink measured in absolute units, so equal type = equal thickness
+      const w = Math.min(slot * 0.98, (p.scale === "uniform" ? pitch : slot) * ink);
       if (w < 0.2) continue;                             // below a printable hairline
       for (const k of off ? [off, off - W] : [0]) {       // wrap copy only when offset
         const x0 = cx - w / 2 + k, x1 = cx + w / 2 + k;
@@ -275,7 +303,7 @@ function makeSVG(time = null) {
   const stripes = bands.join("");
   const blend = p.blend === "normal" ? "" : ` style="mix-blend-mode:${p.blend}"`;
 
-  return {w: W, h: H, svg:
+  return {w: W, h: H, cols: cuts.length, svg:
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
     + `<rect width="${W}" height="${H}" fill="${p.paper}"/>`
     + `<g${blend}>${stripes}</g></svg>`};
@@ -299,6 +327,13 @@ function draw(time) {
   art = makeSVG(time);
   stage.innerHTML = art.svg;
   view.apply();
+  // Legibility readout: rows per text line is the type's vertical resolution and
+  // columns its horizontal one. Under ~8 rows/line the letterforms stop reading,
+  // which is far and away the most common reason output looks like noise.
+  const perLine = p.rows / (p.hpx / typeMask().LH);
+  const res = document.getElementById("res");
+  res.textContent = `— ${perLine.toFixed(0)} rows/line, ${art.cols} cols`;
+  res.style.color = perLine < 8 ? "#c00" : "#999";
 }
 function tick(now) {
   if (p.motion === "none" || paused) { raf = null; return; }
