@@ -29,6 +29,13 @@
   #peekbox { display: flex; align-items: center; gap: 8px; margin: 8px 0 2px; }
   #peekbox canvas { display: block; border-radius: 4px; background: #000; }
   #peekbox span { color: #999; }
+  #panel details { border-top: 1px solid #eee; }
+  #panel details > label:last-child { margin-bottom: 12px; }
+  #panel summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between;
+                   padding: 7px 0; color: #888; font: 600 11px/1 system-ui; letter-spacing: .07em; text-transform: uppercase; }
+  #panel summary::-webkit-details-marker { display: none; }
+  #panel summary::after { content: "+"; font-size: 13px; }
+  #panel details[open] summary::after { content: "\2212"; }
 </style>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="stylesheet" href="mobile.css">
@@ -57,7 +64,9 @@
 <script src="mobile.js"></script>
 <script>
 // ---------- parameters ----------
+// A ["", "group", …] row opens a new collapsible section; rows after it land in it.
 const DEFS = [
+  ["", "group", {label: "type"}],
   ["text",   "text",   {value: "NEXUM", label: "text"}],
   ["fontsize","range", {min: 2, max: 4000, step: 1, value: 300, label: "font size px"}],
   ["fit",    "select", {options: ["free", "fit width"], value: "free", label: "size mode"}],
@@ -70,34 +79,57 @@ const DEFS = [
   ["basey",  "range",  {min: -100, max: 100, step: 1, value: 0, label: "baseline y %"}],
   ["track",  "range",  {min: -20, max: 200, step: 1, value: 0, label: "tracking %"}],
   ["gapx",   "range",  {min: 0, max: 300, step: 5, value: 40, label: "word gap %"}],
-  ["seed",   "range",  {min: 1, max: 9999, step: 1, value: 42}],
+  ["", "group", {label: "motion"}],
   ["motion", "select", {options: ["up", "down", "left", "right", "none"], value: "up"}],
   ["secs",   "range",  {min: 1, max: 40, step: 0.5, value: 12, label: "cycle sec"}],
-  ["paper",  "color",  {value: "#000000", label: "paper"}],
+  ["", "group", {label: "grid"}],
   ["rows",   "range",  {min: 1, max: 240, step: 1, value: 64, label: "grid rows"}],
   ["rowgap", "range",  {min: 0, max: 70, step: 1, value: 0, label: "row gap %"}],
   ["rowphase","range", {min: -100, max: 100, step: 1, value: 0, label: "row phase %"}],
   ["rowlag", "range",  {min: -100, max: 100, step: 1, value: 0, label: "row lag %"}],
   ["skew",   "range",  {min: -60, max: 60, step: 1, value: 8, label: "slant °"}],
   ["stagger","range",  {min: 0, max: 100, step: 5, value: 0, label: "row offset %"}],
+  ["", "group", {label: "stripes"}],
+  ["seed",   "range",  {min: 1, max: 9999, step: 1, value: 42}],
   ["depth",  "range",  {min: 1, max: 9, step: 1, value: 7, label: "fractal depth"}],
   ["jitter", "range",  {min: 0, max: 95, step: 5, value: 45, label: "width jitter %"}],
   ["minw",   "range",  {min: 1, max: 80, step: 1, value: 4, label: "min stripe px"}],
+  ["", "group", {label: "ink"}],
   ["scale",  "select", {options: ["uniform", "proportional"], value: "uniform", label: "ink scale"}],
   ["ink0",   "range",  {min: 0, max: 200, step: 1, value: 12, label: "thin ink %"}],
   ["ink1",   "range",  {min: 0, max: 200, step: 1, value: 95, label: "thick ink %"}],
   ["contrast","range", {min: 20, max: 400, step: 5, value: 150, label: "contrast %"}],
   ["levels", "range",  {min: 1, max: 8, step: 1, value: 1, label: "levels (1=smooth)"}],
+  ["", "group", {label: "colour"}],
+  ["paper",  "color",  {value: "#000000", label: "paper"}],
   ["c1",     "color",  {value: "#e8112d", label: "stripe 1"}],
   ["c2",     "color",  {value: "#ff2ec4", label: "stripe 2"}],
   ["c3",     "color",  {value: "#e8112d", label: "stripe 3"}],
   ["blend",  "select", {options: ["normal", "multiply", "screen", "difference"], value: "normal", label: "stripe blend"}],
+  ["", "group", {label: "export"}],
   ["fps",    "range",  {min: 5, max: 30, step: 1, value: 20, label: "gif fps"}],
   ["gifpx",  "range",  {min: 200, max: 1000, step: 50, value: 600, label: "gif px"}]
 ];
 const p = {};
 const saved = JSON.parse(localStorage.getItem("stripe-marquee") || "{}");
 const controls = document.getElementById("controls");
+
+// ---------- collapsible groups ----------
+// Native <details>: no toggle state machine, and open/closed rides along in the
+// same saved blob as every other parameter.
+p.open = saved.open || {};
+let cur = controls;
+const group = name => {
+  const d = document.createElement("details");
+  d.open = p.open[name] ?? name === "type";
+  d.innerHTML = `<summary>${name}</summary>`;
+  d.addEventListener("toggle", () => {
+    p.open[name] = d.open;
+    localStorage.setItem("stripe-marquee", JSON.stringify(p));
+  });
+  controls.append(d);
+  return cur = d;
+};
 
 // ---------- artboard size (exact pixels) ----------
 p.wpx = +saved.wpx || 1500;
@@ -160,10 +192,11 @@ p.hpx = +saved.hpx || 2000;
     preset.value = "custom";
     apply();
   });
-  controls.append(sizeRow, presetRow);
+  group("artboard").append(sizeRow, presetRow);
 }
 
 for (const [key, type, opt] of DEFS) {
+  if (type === "group") { group(opt.label); continue; }
   p[key] = key in saved ? saved[key] : opt.value;
   const label = document.createElement("label");
   const name = document.createElement("span");
@@ -188,7 +221,7 @@ for (const [key, type, opt] of DEFS) {
     if (out) out.value = input.value;
     render();
   });
-  controls.append(label);
+  cur.append(label);
 }
 
 // ---------- type mask ----------
