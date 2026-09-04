@@ -62,14 +62,30 @@
       desc: "Upload a 2D logo (SVG or image) and extrude it into 3D. SVG becomes true beveled geometry, raster art is stacked into slices. Spin, rock or orbit on any axis, metal shading, uploadable background image, PNG and looping GIF export." }
   ];
 
+  const slug = t => t.file.replace(/^tools\/|\.html$/g, "");   // tools/logo-extruder.html -> logo-extruder
+
   for (const t of tools) $("pick").append(new Option(t.name, t.file));
   const load = () => {
     const t = tools[$("pick").selectedIndex];
     $("frame").src = t.file;
     $("desc").textContent = t.desc;
   };
-  $("pick").addEventListener("input", () => { load(); $("about").style.display = "none"; });
-  load();
+  // deep link: index.html#logo-extruder preselects that tool and skips the about card
+  const fromHash = () => {
+    const i = tools.findIndex(t => slug(t) === location.hash.slice(1));
+    if (i < 0) return false;
+    $("pick").selectedIndex = i;
+    $("about").style.display = "none";
+    load();
+    return true;
+  };
+  $("pick").addEventListener("input", () => {
+    location.hash = slug(tools[$("pick").selectedIndex]);
+    load();
+    $("about").style.display = "none";
+  });
+  addEventListener("hashchange", fromHash);
+  if (!fromHash()) load();
 
   $("close").addEventListener("click", () => $("about").style.display = "none");
 
