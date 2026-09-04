@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>spielwerk — small design tools</title>
 <style>
   html, body { height: 100%; overflow: hidden; }
@@ -26,6 +26,14 @@
   #about .body { padding: 12px 14px; }
   #about .body p { margin: 0 0 10px; color: #444; }
   #about .body p:last-child { margin: 0; color: #999; }
+  @media (max-width: 720px) {
+    html, body { height: 100dvh; }
+    #bar { left: 10px; top: 10px; transform: none; gap: 8px; padding: 6px 10px;
+           max-width: calc(100vw - 20px); }
+    #bar h1, #bar label { display: none; }        /* the picker is the whole bar on a phone */
+    #bar select { font-size: 16px; min-height: 34px; max-width: 60vw; }
+    #about { width: auto; left: 10px; right: 10px; transform: translateY(-50%); }
+  }
 </style>
 <body>
 <div id="bar">
